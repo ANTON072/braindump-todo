@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lesson 8: 抽出結果の編集フォームと保存 — braindump-todo</title>
+<title>Lesson 9: 抽出結果の編集フォームと保存 — braindump-todo</title>
 <style>
 :root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
 * { box-sizing:border-box; }
@@ -31,8 +31,8 @@ pre code { background:none; padding:0; font-size:.8rem; }
 </head>
 <body>
 
-<h1>Lesson 8: 抽出結果の編集フォームと保存（Conform field array）</h1>
-<p class="meta">Conform field array / これまでの総集編 ｜ 目安 Day 19–20（約 2 時間）</p>
+<h1>Lesson 9: 抽出結果の編集フォームと保存（Conform field array）</h1>
+<p class="meta">Conform field array / これまでの総集編 ｜ 目安 Day 27–28（約 2 時間）</p>
 
 <h2>ゴール</h2>
 <p>ブレインダンプページで、テキスト貼り付け → 抽出 → 複数行の編集可能フォームで確認・修正 → 一括保存（タグ upsert 込み）が通しで動く状態。<strong>これで完成です。</strong></p>
@@ -88,13 +88,13 @@ pre code { background:none; padding:0; font-size:.8rem; }
   </div>
 </div>
 <ul class="wf-notes">
-<li>「すべて保存」を DOM 上で最初の submit に置く（Enter の暗黙送信対策・Lesson 8）</li>
+<li>「すべて保存」を DOM 上で最初の submit に置く（Enter の暗黙送信対策・Lesson 9）</li>
 <li>行の追加・削除は Conform の intent ボタン（form.insert / form.remove）。key は taskField.key</li>
 <li>保存は全件 1 トランザクション → 成功で /todos へ redirect。失敗時は 1 件も保存しない</li>
 </ul>
 </div>
 
-<h2>Day 19: field array のフォーム</h2>
+<h2>Day 27: field array のフォーム</h2>
 
 <h3>1. 保存用スキーマ</h3>
 <p><code>src/features/braindump/schema.ts</code> に追記。抽出スキーマ（API の都合で nullable）とは別に、<strong>フォーム用のスキーマ</strong>を定義します。タグは行ごとのカンマ区切り文字列にして、field array を「やさしい形」に保ちます。</p>
@@ -114,7 +114,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <h3>2. ページの状態設計</h3>
 <p><code>src/app/braindump/page.tsx</code>（Client Component）は 2 段階の画面です：</p>
 <ol>
-<li><strong>入力段階</strong> — textarea＋「抽出」ボタン。<code>runBraindumpExtraction</code>（Lesson 7）を呼ぶ。</li>
+<li><strong>入力段階</strong> — textarea＋「抽出」ボタン。<code>runBraindumpExtraction</code>（Lesson 8）を呼ぶ。</li>
 <li><strong>確認段階</strong> — 抽出結果を <code>defaultValue</code> にした field array フォーム。編集して「すべて保存」。</li>
 </ol>
 <p>抽出結果はフォームの <code>defaultValue</code> に変換してから渡します（null → undefined、tags[] → カンマ区切り）：</p>
@@ -202,10 +202,10 @@ export function BraindumpForm({ defaultValue }: { defaultValue: unknown }) {
 </ul>
 </div>
 
-<h2>Day 20: 一括保存と仕上げ</h2>
+<h2>Day 28: 一括保存と仕上げ</h2>
 
 <h3>4. 保存 Server Action</h3>
-<p><code>src/features/braindump/actions.ts</code> に追記。Lesson 5 のヘルパーがそのまま再利用できます——ここが総集編たるゆえんです。</p>
+<p><code>src/features/braindump/actions.ts</code> に追記。Lesson 6 のヘルパーがそのまま再利用できます——ここが総集編たるゆえんです。</p>
 <pre><code>import { redirect } from "next/navigation";
 import { parseWithZod } from "@conform-to/zod";
 import { db } from "@/db";
@@ -236,7 +236,7 @@ export async function saveBraindumpTasks(prevState: unknown, formData: FormData)
 <p><strong>学びどころ：全件で 1 トランザクション</strong></p>
 <p>5 件抽出して 3 件目で失敗したとき、「2 件だけ保存された」状態はユーザーには失敗にしか見えません。
 <strong>ブレインダンプ 1 回の保存は all-or-nothing</strong> にするのが正解で、ループ全体を 1 つの <code>db.transaction</code> で包みます。
-Lesson 5 で <code>attachTagsToTodo</code> が <code>tx</code> を受け取る設計にしておいたことが、ここでそのまま効いています。</p>
+Lesson 6 で <code>attachTagsToTodo</code> が <code>tx</code> を受け取る設計にしておいたことが、ここでそのまま効いています。</p>
 </div>
 
 <h3>5. 通しで動作確認 → デプロイ</h3>
@@ -281,8 +281,8 @@ pnpm dlx sst deploy --stage dev</code></pre>
 </ul>
 
 <div class="nav">
-<span><a href="lesson-07-openai-extraction.html">← Lesson 7</a></span>
-<span><a href="index.html">目次に戻る</a></span>
+<span><a href="lesson-08-openai-extraction.html">← Lesson 8</a></span>
+<span><a href="lesson-10-e2e-playwright.html">Lesson 10: E2E テスト →</a></span>
 </div>
 
 </body>

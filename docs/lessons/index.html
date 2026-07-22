@@ -24,12 +24,15 @@ th { background:var(--code-bg); }
 .wireframe .wf-title { font-size:.8rem; font-weight:600; color:var(--muted); margin:0 0 .8rem; }
 .wf-card { background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; }
 .wf-notes { margin:.8rem 0 0; padding-left:16px; font-size:12px; line-height:1.6; color:#2a78d6; }
+.diamond { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1.2rem; margin:1.2rem 0; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.diamond .tier { border-radius:6px; text-align:center; font-size:12px; padding:8px 10px; color:#fff; }
+.diamond .cap { font-size:11px; color:var(--muted); }
 </style>
 </head>
 <body>
 
 <h1>braindump-todo ハンズオントレーニング</h1>
-<p class="meta">対象：requirements.md に定義された 9 ツールのスタック習得 ／ 時間予算：約 1 時間 × 20 日 ＝ 実働 20 時間</p>
+<p class="meta">対象：requirements.md に定義された 9 ツールのスタック習得＋テスト（Vitest / Playwright）／ 時間予算：約 1 時間 × 32 日 ＝ 実働 約 32 時間（全 10 レッスン）</p>
 
 <p>このトレーニングは「Todo アプリ＋ブレインダンプ抽出＋タグ（多対多）」を題材に、
 Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / Better Auth / OpenAI API / OpenNext + SST
@@ -41,22 +44,40 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <tr><td><a href="lesson-01-setup.html">Lesson 1</a></td><td>プロジェクトセットアップ</td><td>Next.js / TypeScript / Tailwind / shadcn/ui</td><td>Day 1–2（約2h）</td></tr>
 <tr><td><a href="lesson-02-drizzle-schema.html">Lesson 2</a></td><td>DB スキーマとマイグレーション</td><td>Drizzle ORM / PostgreSQL(Docker)</td><td>Day 3–4（約2h）</td></tr>
 <tr><td><a href="lesson-03-better-auth.html">Lesson 3</a></td><td>認証（メール＋パスワード）</td><td>Better Auth × Drizzle</td><td>Day 5–7（約3h）</td></tr>
-<tr><td><a href="lesson-04-todos-crud.html">Lesson 4</a></td><td>Todos の CRUD と認可</td><td>Conform / Zod / Server Actions</td><td>Day 8–10（約3h）</td></tr>
-<tr><td><a href="lesson-05-tags-many-to-many.html">Lesson 5</a></td><td>タグ（多対多）の保存と取得 ★最重要</td><td>Drizzle（upsert・中間テーブル・リレーショナルクエリ）</td><td>Day 11–13（約3h）</td></tr>
-<tr><td><a href="lesson-06-sst-deploy.html">Lesson 6</a></td><td>AWS への初回デプロイ</td><td>SST / OpenNext / Aurora Serverless v2</td><td>Day 14–16（約3h）</td></tr>
-<tr><td><a href="lesson-07-openai-extraction.html">Lesson 7</a></td><td>ブレインダンプ抽出</td><td>OpenAI Structured Outputs / Zod 再検証</td><td>Day 17–18（約2h）</td></tr>
-<tr><td><a href="lesson-08-conform-field-array.html">Lesson 8</a></td><td>抽出結果の編集フォームと保存</td><td>Conform field array</td><td>Day 19–20（約2h）</td></tr>
+<tr><td><a href="lesson-04-testing-foundation.html">Lesson 4</a></td><td>テスト基盤（実 DB 統合テストのハーネス）</td><td>Vitest / Docker（テスト用 PostgreSQL）</td><td>Day 8–11（約4h）</td></tr>
+<tr><td><a href="lesson-05-todos-crud.html">Lesson 5</a></td><td>Todos の CRUD と認可（＋認可の統合テスト）</td><td>Conform / Zod / Server Actions / Vitest</td><td>Day 12–16（約5h）</td></tr>
+<tr><td><a href="lesson-06-tags-many-to-many.html">Lesson 6</a></td><td>タグ（多対多）の保存と取得 ★最重要（＋upsert テスト）</td><td>Drizzle（upsert・中間テーブル・リレーショナルクエリ）/ Vitest</td><td>Day 17–21（約5h）</td></tr>
+<tr><td><a href="lesson-07-sst-deploy.html">Lesson 7</a></td><td>AWS への初回デプロイ</td><td>SST / OpenNext / Aurora Serverless v2</td><td>Day 22–24（約3h）</td></tr>
+<tr><td><a href="lesson-08-openai-extraction.html">Lesson 8</a></td><td>ブレインダンプ抽出</td><td>OpenAI Structured Outputs / Zod 再検証</td><td>Day 25–26（約2h）</td></tr>
+<tr><td><a href="lesson-09-conform-field-array.html">Lesson 9</a></td><td>抽出結果の編集フォームと保存</td><td>Conform field array</td><td>Day 27–28（約2h）</td></tr>
+<tr><td><a href="lesson-10-e2e-playwright.html">Lesson 10</a></td><td>E2E テスト（代表フロー 1 本）</td><td>Playwright</td><td>Day 29–32（約4h）</td></tr>
 </table>
 
 <div class="box warn">
 <p><strong>順序の意図：</strong>スコープ優先度（①認証＋CRUD → ②タグ多対多 → ③ブレインダンプ → ④UI作り込み）に沿って、
-<strong>必達コアが完成した Lesson 5 の直後にデプロイ（Lesson 6）</strong>を挟んでいます。
-万一 Lesson 7 以降で時間切れになっても「認証つき・タグつき Todo アプリが AWS で動いている」状態が確保されます。
-初回デプロイと Better Auth × Drizzle 接続は既知の山場なので、それぞれ 3 時間を確保しています。</p>
+<strong>必達コアが完成した Lesson 6 の直後にデプロイ（Lesson 7）</strong>を挟んでいます。
+万一 Lesson 8 以降で時間切れになっても「認証つき・タグつき Todo アプリが AWS で動いている」状態が確保されます。
+初回デプロイと Better Auth × Drizzle 接続は既知の山場なので、それぞれ 3 時間を確保しています。
+また<strong>テスト基盤（Lesson 4）をコア実装（Lesson 5・6）の手前に置き</strong>、認可・upsert を書いた直後に同じレッスン内で統合テストを書けるようにしています。E2E（Lesson 10）は全機能が揃ってから代表フロー 1 本だけを最後に足します。</p>
 </div>
 
+<h2>テスト戦略（ダイヤモンド型）</h2>
+<p>AI がバックエンドを大量に生成する時代に決定的に効くのは「生成されたコードが正しいと<strong>検証できる</strong>能力」です。
+本教材は<strong>ダイヤモンド型</strong>——中央（実 DB に対する統合テスト）を最も太く、ユニットと E2E を薄く——で組み立てます。</p>
+<div class="diamond">
+<div class="tier" style="width:150px;background:#8250df">E2E（Playwright）</div>
+<div class="tier" style="width:420px;background:#1a7f37">統合テスト（サービス関数 × 実 DB）</div>
+<div class="tier" style="width:230px;background:#57606a">ユニット（純粋関数）</div>
+<p class="cap">中央（統合）を最も太く。上下は薄く。</p>
+</div>
+<ul>
+<li><strong>Server Component は E2E で見る</strong>（Next.js 公式が <code>async</code> Server Component はユニットより E2E を推奨）。<code>app/todos/page.tsx</code> は「認証→クエリ→描画」の薄いガワなので、その描画経路は Lesson 10 の実ブラウザで担保する。</li>
+<li><strong>ロジックはサービス層に抽出し、実 DB で統合テスト</strong>する。<code>next/*</code> をモックせずに済むよう、認可・作成ロジックを <code>service.ts</code> へ切り出す（Lesson 5・6）。</li>
+<li><strong>純粋関数だけユニット</strong>（<code>normalizeTagNames</code>・<code>todoSchema</code> の境界値）。自明なコンポーネントのユニットは書かない。</li>
+</ul>
+
 <h2>画面ワイヤーフレーム（全体フロー）</h2>
-<p>完成形は 4 画面です。各画面の詳細ワイヤーフレームは対応するレッスン（Lesson 3・4・5・7・8）の冒頭に掲載しています。</p>
+<p>完成形は 4 画面です。各画面の詳細ワイヤーフレームは対応するレッスン（Lesson 3・5・6・8・9）の冒頭に掲載しています。</p>
 
 <div class="wireframe">
 <p class="wf-title">全体フロー（4 画面＋遷移）</p>
@@ -93,9 +114,10 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <h2>事前準備（Lesson 1 の前に）</h2>
 <ul>
 <li>Node.js 20 以上（LTS 推奨）と pnpm</li>
-<li>Docker Desktop（ローカル開発用 PostgreSQL に使用）</li>
-<li>AWS アカウントと認証情報（<code>aws configure</code> 済み。Lesson 6 で使用）</li>
-<li>OpenAI API キー（Lesson 7 で使用。数十円程度の課金が発生）</li>
+<li>Docker Desktop（ローカル開発用 PostgreSQL と、Lesson 4 で足すテスト用 PostgreSQL に使用）</li>
+<li>AWS アカウントと認証情報（<code>aws configure</code> 済み。Lesson 7 で使用）</li>
+<li>OpenAI API キー（Lesson 8 で使用。数十円程度の課金が発生）</li>
+<li>Playwright のブラウザ（Lesson 10 で <code>pnpm create playwright</code> 時に導入。事前準備は不要）</li>
 </ul>
 
 <h2>設計上のデフォルト（変更したければここだけ差し替える）</h2>
@@ -104,7 +126,7 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <tr><th>論点</th><th>デフォルト</th><th>理由</th></tr>
 <tr><td>status の持ち方</td><td><code>open / done</code> の 2 値 enum</td><td>ステートマシンは今回の学習対象外。最小で十分</td></tr>
 <tr><td>ソフトデリート</td><td>なし（物理削除）</td><td>認可チェックの学びに集中する。deletedAt は将来課題</td></tr>
-<tr><td>タグ入力 UI</td><td>カンマ区切りテキスト</td><td>カンマ区切り入力は必達コア②の最小実装として Lesson 5 で作る。チップ型ピッカーや絞り込み UI（優先度4・任意）は採用しない</td></tr>
+<tr><td>タグ入力 UI</td><td>カンマ区切りテキスト</td><td>カンマ区切り入力は必達コア②の最小実装として Lesson 6 で作る。チップ型ピッカーや絞り込み UI（優先度4・任意）は採用しない</td></tr>
 <tr><td>dueDate</td><td><code>date</code> 型（時刻なし）</td><td>タイムゾーン問題を回避</td></tr>
 <tr><td>OpenAI モデル</td><td>gpt-4o-mini</td><td>抽出用途には十分・安価</td></tr>
 </table>
@@ -121,7 +143,7 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <div class="box">
 <p><strong>ライブラリのバージョンについて：</strong>本テキストのコードは執筆時点の各ライブラリの安定版イディオムに基づいています。
 Conform・Better Auth・SST は API の変化が速いため、コードが動かない場合はまず公式ドキュメントの該当ページ（各レッスン末尾にリンクあり）と突き合わせてください。
-なお Zod は本テキスト全体を v3 構文で統一しており、Lesson 4 で <code>zod@3</code> を明示してインストールします。
+なお Zod は本テキスト全体を v3 構文で統一しており、Lesson 5 で <code>zod@3</code> を明示してインストールします。
 「テキストと現実の差分を自分で埋める」こと自体が実務的な学びです。</p>
 </div>
 

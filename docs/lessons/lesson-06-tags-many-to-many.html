@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lesson 5: タグ（多対多）の保存と取得 — braindump-todo</title>
+<title>Lesson 6: タグ（多対多）の保存と取得 — braindump-todo</title>
 <style>
 :root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
 * { box-sizing:border-box; }
@@ -31,8 +31,8 @@ pre code { background:none; padding:0; font-size:.8rem; }
 </head>
 <body>
 
-<h1>Lesson 5: タグ（多対多）の保存と取得 ★最重要</h1>
-<p class="meta">Drizzle（find-or-create / 中間テーブル / リレーショナルクエリ）｜ 目安 Day 11–13（約 3 時間）</p>
+<h1>Lesson 6: タグ（多対多）の保存と取得 ★最重要</h1>
+<p class="meta">Drizzle（find-or-create / 中間テーブル / リレーショナルクエリ）/ upsert の統合テスト・normalizeTagNames のユニット ｜ 目安 Day 17–21（約 5 時間）</p>
 
 <h2>ゴール</h2>
 <p>todo 作成時にカンマ区切りでタグを入力でき、「あれば再利用・なければ作成」で保存され、一覧にタグ付きで表示される状態。</p>
@@ -100,7 +100,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 このレッスンだけは、コードを写す前に<strong>まず紙に処理の流れを書いてから</strong>実装することを勧めます。</p>
 </div>
 
-<h2>Day 11: タグ upsert ヘルパー</h2>
+<h2>Day 17: タグ upsert ヘルパー</h2>
 
 <h3>1. 保存ロジックの設計を言葉で押さえる</h3>
 <p>「タグ名の配列を受け取り、todo に紐付ける」処理は 3 ステップに分解できます：</p>
@@ -160,15 +160,44 @@ export async function attachTagsToTodo(
     .onConflictDoNothing();
 }</code></pre>
 
-<h2>Day 12: 作成フローへの組み込み</h2>
+<h2>Day 18: 作成フローへの組み込み</h2>
 
 <h3>3. スキーマとフォームに tags を足す</h3>
 <p><code>todoSchema</code> に 1 フィールド追加（カンマ区切り文字列のまま受ける）：</p>
 <pre><code>tagsInput: z.string().max(500).optional(),</code></pre>
 <p>フォームには <code>&lt;Input {...getInputProps(fields.tagsInput, { type: "text" })} placeholder="タグ（カンマ区切り: 買い物, 仕事）" /&gt;</code> を追加。チップ型ピッカーは作りません（優先度 4）。</p>
 
-<h3>4. createTodo をトランザクション化する</h3>
+<h3>4. 作成ロジックを createTodoForUser に抽出する</h3>
+<p>Lesson 5 で作った <code>src/features/todos/service.ts</code> に、todo 本体の INSERT とタグ紐付けをひとまとめにする <code>createTodoForUser</code> を足します。
+トランザクションの <code>tx</code> を受け取り、内部で <code>attachTagsToTodo</code> を呼ぶ形にします：</p>
 <pre><code>import { attachTagsToTodo, normalizeTagNames } from "@/features/tags/upsert-tags";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+
+type Tx = Parameters&lt;Parameters&lt;typeof db.transaction&gt;[0]&gt;[0];
+
+type CreateTodoInput = {
+  title: string;
+  dueDate?: string;
+  priority?: "low" | "med" | "high";
+  tagsInput?: string;
+};
+
+export async function createTodoForUser(
+  tx: Tx,
+  userId: string,
+  input: CreateTodoInput,
+) {
+  const { tagsInput, ...todoValues } = input;
+  const [todo] = await tx
+    .insert(todos)
+    .values({ ...todoValues, userId })
+    .returning();
+  await attachTagsToTodo(tx, userId, todo.id, normalizeTagNames(tagsInput ?? ""));
+  return todo;
+}</code></pre>
+<p><code>actions.ts</code> の <code>createTodo</code> は、トランザクションを開いてこのサービス関数を呼ぶだけの薄いガワにします：</p>
+<pre><code>import { createTodoForUser } from "./service";
 
 export async function createTodo(prevState: unknown, formData: FormData) {
   const userId = await requireUserId();
@@ -176,29 +205,24 @@ export async function createTodo(prevState: unknown, formData: FormData) {
   const submission = parseWithZod(formData, { schema: todoSchema });
   if (submission.status !== "success") return submission.reply();
 
-  const { tagsInput, ...todoValues } = submission.value;
-  const tagNames = normalizeTagNames(tagsInput ?? "");
-
-  await db.transaction(async (tx) =&gt; {
-    const [todo] = await tx.insert(todos)
-      .values({ ...todoValues, userId })
-      .returning();
-    await attachTagsToTodo(tx, userId, todo.id, tagNames);
-  });
+  await db.transaction((tx) =&gt; createTodoForUser(tx, userId, submission.value));
 
   revalidatePath("/todos");
   return submission.reply({ resetForm: true });
 }</code></pre>
 
 <div class="box learn">
-<p><strong>学びどころ：トランザクションの境界の決め方</strong></p>
+<p><strong>学びどころ：トランザクションの境界の決め方（と、それがテスト容易性に効く理由）</strong></p>
 <p>「todo は作られたのにタグの紐付けだけ失敗した」という中途半端な状態を許さないため、
 <strong>todo 本体の INSERT とタグ処理を 1 つの <code>db.transaction</code> に入れます</strong>。
-ヘルパーが <code>db</code> ではなく <code>tx</code> を受け取る設計にしたのはこのためで、「トランザクションを開く責任は呼び出し側、
+ヘルパーとサービス関数が <code>db</code> ではなく <code>tx</code> を受け取る設計にしたのはこのためで、「トランザクションを開く責任は呼び出し側、
 中で何をするかは部品側」という分担は実務でもよく使う形です。</p>
+<p>この分担は<strong>そのままテスト容易性にも効きます</strong>。<code>createTodoForUser(tx, userId, input)</code> は <code>next/*</code> に依存しないので、
+テストからは <code>db.transaction</code> を開いて <code>tx</code> を渡すだけで、実 DB に対して作成＋タグ upsert の一連を検証できます（Day 20–21）。
+Server Action ごとモックする必要はありません。</p>
 </div>
 
-<h2>Day 13: タグ付きで一覧を取得する</h2>
+<h2>Day 19: タグ付きで一覧を取得する</h2>
 
 <h3>5. リレーショナルクエリ</h3>
 <p><code>src/app/todos/page.tsx</code> の取得部を差し替え：</p>
@@ -230,6 +254,106 @@ Drizzle が組み立て、結果を型付きのネスト構造で返してくれ
 <h3>6. （任意）編集時のタグ更新</h3>
 <p>余力があれば、todo 編集でタグを差し替える処理も書いてみてください。定石は「<code>tx.delete(todosToTags).where(eq(todosToTags.todoId, todoId))</code> で紐付けを全消し → <code>attachTagsToTodo</code> で再構築」。差分更新より単純で、中間テーブルならではの割り切りです。</p>
 
+<h2>Day 20–21: upsert を統合テストで、正規化をユニットテストで守る</h2>
+<p>このレッスンの緑チェックポイント（再利用・cascade・userId 込みユニーク・空配列ガード）は、目視だと毎回手で確かめるのが大変で、しかも回帰しやすい箇所です。
+<strong>そのままテストケースに写し取ります</strong>——中央（統合）を太く、下（ユニット）を薄く、というダイヤモンドの配分どおりに。</p>
+
+<h3>7. 統合テスト（中央・太）— 実 DB に対して upsert の性質を検証する</h3>
+<p><code>src/features/todos/create-todo.test.ts</code>。<code>createTodoForUser</code> を <code>db.transaction</code> 越しに呼び、Lesson 4 のハーネスの実 DB で 4 つの性質を確かめます：</p>
+<pre><code>import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { tags, todosToTags } from "@/db/schema";
+import { seedUser } from "@/test/seed";
+import { createTodoForUser, deleteTodoForUser } from "./service";
+
+let userA: string;
+let userB: string;
+
+beforeEach(async () =&gt; {
+  userA = await seedUser("a@example.com");
+  userB = await seedUser("b@example.com");
+});
+
+describe("タグ upsert（createTodoForUser 経由）", () =&gt; {
+  it("同名タグを含む 2 件を作っても tags は再利用され行が増えない", async () =&gt; {
+    await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userA, { title: "牛乳", tagsInput: "買い物" }));
+    await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userA, { title: "卵", tagsInput: "買い物, 仕事" }));
+
+    const tagRows = await db.select().from(tags).where(eq(tags.userId, userA));
+    // 「買い物」は再利用されるので、増えるのは「仕事」だけ → 計 2 行
+    expect(tagRows).toHaveLength(2);
+    expect(tagRows.map((t) =&gt; t.name).sort()).toEqual(["仕事", "買い物"]);
+  });
+
+  it("todo を削除すると中間テーブルは消えるが tags 本体は残る（cascade）", async () =&gt; {
+    const todo = await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userA, { title: "牛乳", tagsInput: "買い物" }));
+
+    await deleteTodoForUser(db, userA, todo.id);
+
+    const links = await db
+      .select().from(todosToTags).where(eq(todosToTags.todoId, todo.id));
+    expect(links).toHaveLength(0); // 紐付けは cascade で消える
+
+    const tagRows = await db.select().from(tags).where(eq(tags.userId, userA));
+    expect(tagRows).toHaveLength(1); // タグ本体は残る（他 todo で再利用できる）
+  });
+
+  it("別ユーザーは同名タグ「買い物」を独立して持てる（ユニークは userId 込み）", async () =&gt; {
+    await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userA, { title: "A の牛乳", tagsInput: "買い物" }));
+    await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userB, { title: "B の牛乳", tagsInput: "買い物" }));
+
+    const allBuy = await db.select().from(tags).where(eq(tags.name, "買い物"));
+    expect(allBuy).toHaveLength(2); // A 用・B 用で別行になる
+  });
+
+  it("タグ入力が空でもエラーにならず、todo だけ作られる（空配列ガード）", async () =&gt; {
+    const todo = await db.transaction((tx) =&gt;
+      createTodoForUser(tx, userA, { title: "タグなし", tagsInput: "" }));
+
+    expect(todo.title).toBe("タグなし");
+    const tagRows = await db.select().from(tags).where(eq(tags.userId, userA));
+    expect(tagRows).toHaveLength(0);
+  });
+});</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：この 4 本が「実 DB でしか守れない」性質そのもの</strong></p>
+<p>再利用は <code>onConflictDoNothing</code> ＋ 複合ユニーク制約が、cascade は <code>onDelete: "cascade"</code> が、
+userId 込みユニークは <code>uniqueIndex(userId, name)</code> が、それぞれ <strong>PostgreSQL 側で</strong>効いて初めて成立します。
+DB をモックしたら、これらは全部「モックがそう振る舞うと決めた作り物」になり、検証の意味が消えます。
+だからここは中央（統合）で太く積む——ダイヤモンドの一番おいしいところです。</p>
+</div>
+
+<h3>8. ユニットテスト（下・薄）— normalizeTagNames の正規化</h3>
+<p>正規化は DB を要さない純粋関数なので、こちらは軽いユニットで十分です。<code>src/features/tags/upsert-tags.test.ts</code>：</p>
+<pre><code>import { describe, expect, it } from "vitest";
+import { normalizeTagNames } from "./upsert-tags";
+
+describe("normalizeTagNames", () =&gt; {
+  it("前後の空白を trim する", () =&gt; {
+    expect(normalizeTagNames(" 買い物 , 仕事 ")).toEqual(["買い物", "仕事"]);
+  });
+  it("英字は小文字化する", () =&gt; {
+    expect(normalizeTagNames("Work, HOME")).toEqual(["work", "home"]);
+  });
+  it("trim・小文字化した後に重複を除去する", () =&gt; {
+    expect(normalizeTagNames("Work, work,  WORK ")).toEqual(["work"]);
+  });
+  it("空要素は落とす", () =&gt; {
+    expect(normalizeTagNames("買い物, , ,仕事,")).toEqual(["買い物", "仕事"]);
+  });
+  it("空文字は空配列を返す（空配列ガードの前提）", () =&gt; {
+    expect(normalizeTagNames("")).toEqual([]);
+  });
+});</code></pre>
+<p>この薄いユニットが、統合テストで守る「空配列ガード」の入口（正規化結果が空になりうる）を裏側で保証します。</p>
+
 <div class="box check">
 <p><strong>チェックポイント</strong></p>
 <ul>
@@ -237,6 +361,7 @@ Drizzle が組み立て、結果を型付きのネスト構造で返してくれ
 <li>一覧の各 todo にタグの Badge が表示される</li>
 <li>todo を削除 → todos_to_tags の紐付け行が消える（cascade の確認）が、tags 本体は残る</li>
 <li>別ユーザーで同名タグ「買い物」を作れる（ユニーク制約が userId 込みであることの確認）</li>
+<li><code>pnpm test</code> が緑になる。<strong>上の 4 項目は Day 20–21 の統合テスト 4 本にそのまま 1 対 1 対応</strong>している（手で確かめたことを、以後は回帰テストが守る）</li>
 </ul>
 </div>
 
@@ -257,8 +382,8 @@ Drizzle が組み立て、結果を型付きのネスト構造で返してくれ
 </ul>
 
 <div class="nav">
-<span><a href="lesson-04-todos-crud.html">← Lesson 4</a></span>
-<span><a href="lesson-06-sst-deploy.html">Lesson 6: AWS への初回デプロイ →</a></span>
+<span><a href="lesson-05-todos-crud.html">← Lesson 5</a></span>
+<span><a href="lesson-07-sst-deploy.html">Lesson 7: AWS への初回デプロイ →</a></span>
 </div>
 
 </body>

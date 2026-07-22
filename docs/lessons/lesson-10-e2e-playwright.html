@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10: E2E テスト（Playwright） — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+.diamond { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1.2rem; margin:1.2rem 0; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.diamond .tier { border-radius:6px; text-align:center; font-size:12px; padding:8px 10px; color:#fff; }
+.diamond .cap { font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 10: E2E テスト（Playwright）</h1>
+<p class="meta">Playwright / webServer / 代表フロー 1 本 ｜ 目安 Day 29–32（約 4 時間）</p>
+
+<h2>ゴール</h2>
+<p>実ブラウザで dev サーバを叩き、<strong>ログイン → タグ付き todo 作成 → 完了切替 → 削除 → ログアウト</strong>の代表フロー 1 本と、
+<strong>未認証で <code>/todos</code> に触れるとログインへリダイレクトされる</strong>ことが自動で検証される状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：E2E はダイヤモンドの「薄い頂点」</strong></p>
+<div class="diamond">
+<div class="tier" style="width:150px;background:#8250df">E2E（Playwright）← 今回</div>
+<div class="tier" style="width:420px;background:#1a7f37">統合テスト（Lesson 5・6 で厚く積んだ）</div>
+<div class="tier" style="width:230px;background:#57606a">ユニット（normalizeTagNames 等）</div>
+<p class="cap">E2E は遅く壊れやすいので、代表フロー 1 本に絞る</p>
+</div>
+<p>認可や upsert の細かな分岐は Lesson 5・6 の統合テストで既に守られています。E2E はそれらを繰り返さず、
+<strong>「画面・Server Action・DB・認証がつながって 1 本の動線として通るか」だけ</strong>を代表フローで確かめます。
+E2E はブラウザを起動するぶん遅く壊れやすいので、本数を増やさないのがダイヤモンドの思想です。</p>
+</div>
+
+<div class="box learn">
+<p><strong>学びどころ：ここで初めて async Server Component の描画経路を担保する</strong></p>
+<p>Lesson 4 で見たとおり、<code>app/todos/page.tsx</code> のような <code>async</code> Server Component は Vitest では扱えず、公式も E2E を推奨していました。
+その「ユニットで触れなかった描画経路」——<code>requireUserId()</code> でセッションを解決し、<code>db.query</code> で自分の todo を引き、
+サーバーで HTML を組み立ててブラウザに返すまで——を、<strong>実ブラウザで初めて通しで検証する</strong>のがこのレッスンの役割です。</p>
+</div>
+
+<h2>Day 29: Playwright の導入とテスト用 DB への接続</h2>
+
+<h3>1. インストール</h3>
+<pre><code>pnpm create playwright</code></pre>
+<p>対話で TypeScript・<code>e2e</code> ディレクトリ・ブラウザのインストールを選びます。生成される <code>playwright.config.ts</code> を最小構成に整えます。</p>
+
+<h3>2. playwright.config.ts</h3>
+<p>ポイントは 2 つ——<strong><code>webServer</code> で dev サーバを自動起動</strong>し、その dev サーバを<strong>テスト用 DB に向ける</strong>ことです
+（<code>db/index.ts</code> は Lesson 4 で <code>TEST_DATABASE_URL</code> を優先する形にしてあります）：</p>
+<pre><code>import { config } from "dotenv";
+import { defineConfig } from "@playwright/test";
+
+config({ path: ".env.test" });
+
+export default defineConfig({
+  testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts",
+  use: { baseURL: "http://localhost:3000" },
+  webServer: {
+    command: "pnpm dev",
+    url: "http://localhost:3000",
+    // CI では毎回新規に起動、ローカルでは起動済みサーバを使い回す
+    reuseExistingServer: !process.env.CI,
+    env: {
+      // dev サーバをテスト DB に向ける（開発 DB を汚さない）
+      TEST_DATABASE_URL: process.env.TEST_DATABASE_URL!,
+    },
+  },
+});</code></pre>
+
+<h3>3. globalSetup でテスト DB を掃除し、ログインできるユーザーを 1 人 seed する</h3>
+<p>E2E も統合テストと同じく、<strong>走らせる前にテスト DB を truncate</strong> して既知の状態から始めます。
+このアプリは招待制で<strong>登録 UI が無い</strong>（Lesson 3）ので、「登録」は UI 操作ではなく seed で用意します。<code>e2e/global-setup.ts</code>：</p>
+<pre><code>import { sql } from "drizzle-orm";
+import { db } from "@/db";
+import { auth } from "@/lib/auth";
+
+export const TEST_USER = {
+  name: "E2E",
+  email: "e2e@example.com",
+  password: "e2e-password-123",
+};
+
+export default async function globalSetup() {
+  if (!process.env.TEST_DATABASE_URL) {
+    throw new Error("TEST_DATABASE_URL が未設定です。E2E はテスト用 DB でのみ実行してください。");
+  }
+
+  await db.execute(
+    sql`TRUNCATE TABLE "user", todos, tags, todos_to_tags RESTART IDENTITY CASCADE`,
+  );
+
+  // 招待制のため UI 登録は無い。Lesson 3 の seed-users.ts と同じ経路でユーザーを作る
+  await auth.api.signUpEmail({ body: TEST_USER });
+}</code></pre>
+
+<div class="box warn">
+<p><strong>disableSignup との両立</strong></p>
+<p>Lesson 3 で <code>disableSignup: true</code> にすると <code>auth.api.signUpEmail</code> も 403 で弾かれます（seed-users.ts と同じ制約）。
+E2E で seed するには、<strong>disableSignup を環境変数で切り替え可能</strong>にして、テスト環境（<code>.env.test</code>）でだけ登録を許可するのが素直です。
+「本番は招待制、テストは seed 可能」を env で分けます。</p>
+</div>
+
+<h2>Day 30–31: 代表フロー 1 本を書く</h2>
+
+<h3>4. ハッピーパス</h3>
+<p><code>e2e/happy-path.spec.ts</code>。セレクタは Lesson 3・5 で書いた placeholder / ボタンラベルに合わせています：</p>
+<pre><code>import { expect, test } from "@playwright/test";
+import { TEST_USER } from "./global-setup";
+
+test("ログイン→タグ付き作成→完了切替→削除→ログアウト", async ({ page }) =&gt; {
+  // ① ログイン
+  await page.goto("/login");
+  await page.getByPlaceholder("メールアドレス").fill(TEST_USER.email);
+  await page.getByPlaceholder("パスワード").fill(TEST_USER.password);
+  await page.getByRole("button", { name: "ログイン" }).click();
+  await page.waitForURL("/todos");
+
+  // ② タグ付きで作成
+  await page.getByPlaceholder("やること").fill("歯医者に電話");
+  await page.getByPlaceholder(/タグ/).fill("健康");
+  await page.getByRole("button", { name: "追加" }).click();
+
+  await expect(page.getByText("歯医者に電話")).toBeVisible();
+  await expect(page.getByText("健康")).toBeVisible(); // タグ Badge も描画される
+
+  // ③ 完了切替
+  await page.getByRole("checkbox").first().check();
+
+  // ④ 削除
+  await page.getByRole("button", { name: "削除" }).first().click();
+  await expect(page.getByText("歯医者に電話")).toHaveCount(0);
+
+  // ⑤ ログアウト
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await page.waitForURL("/login");
+});</code></pre>
+
+<h3>5. 未認証リダイレクト</h3>
+<p>各テストは既定で<strong>まっさらなブラウザコンテキスト</strong>（Cookie なし）から始まります。ログインしていない状態で保護ページに触れると <code>requireUserId()</code> がリダイレクトすることを確かめます：</p>
+<pre><code>test("未認証で /todos に触れるとログインへ飛ばされる", async ({ page }) =&gt; {
+  await page.goto("/todos");
+  await expect(page).toHaveURL(/\/login/);
+});</code></pre>
+
+<h3>6. 実行</h3>
+<pre><code>pnpm db:push:test      # テスト DB のスキーマを最新に（Lesson 4）
+pnpm exec playwright test</code></pre>
+<p>初回はブラウザのダウンロードが走ります。<code>--ui</code> を付けるとタイムトラベル付きの UI モードで、どこで落ちたかを画面で追えます。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li><code>playwright test</code> が 2 本とも緑になる</li>
+<li>dev サーバがテスト DB（5433）に向いており、開発 DB（5432）のデータが E2E で消えない</li>
+<li>ハッピーパスの各ステップを <code>--ui</code> で 1 つずつ再生して、実ブラウザ上の描画を目で確認した</li>
+<li>Lesson 5・6 の統合テストと合わせ、<strong>ダイヤモンドの 3 層（薄ユニット・太い統合・薄 E2E）が揃った</strong></li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li><strong>E2E もテスト DB を truncate してから走る。</strong>開発 DB を向いたまま実行すると確認用データが消える。<code>globalSetup</code> のガード（<code>TEST_DATABASE_URL</code> チェック）を外さない。</li>
+<li><strong>認証状態の使い回しに注意。</strong>ログインを毎テストで繰り返すのが遅くなってきたら <code>storageState</code>（保存したログイン Cookie を再利用）で高速化できるが、その場合は「未認証リダイレクト」テストだけ空の context にするなど、状態の分離を意識する。まずは使い回さない素朴な形で始めてよい。</li>
+<li><strong>CI では <code>webServer.reuseExistingServer: false</code>。</strong>ローカルは起動済み dev を使い回して速くしたいが、CI では毎回クリーンに起動する（<code>!process.env.CI</code> で分岐済み）。</li>
+<li>要素が見つからず落ちるときは、<code>getByRole</code> / <code>getByPlaceholder</code> が実際のマークアップと一致しているか。<code>playwright test --ui</code> や <code>--debug</code> でセレクタを確かめる。</li>
+<li>Aurora ではなくローカル dev で走らせること。E2E は外部 API（OpenAI）に触れないコア動線に限定し、ブレインダンプ抽出フローは対象外にしている（コストと不安定さを持ち込まない）。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://nextjs.org/docs/app/guides/testing/playwright">Next.js — Playwright セットアップ</a></li>
+<li><a href="https://playwright.dev/docs/test-webserver">Playwright — webServer</a></li>
+<li><a href="https://playwright.dev/docs/auth">Playwright — Authentication（storageState）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-09-conform-field-array.html">← Lesson 9</a></span>
+<span><a href="index.html">目次に戻る</a></span>
+</div>
+
+</body>
+</html>

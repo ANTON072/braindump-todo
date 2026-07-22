@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lesson 6: AWS への初回デプロイ — braindump-todo</title>
+<title>Lesson 7: AWS への初回デプロイ — braindump-todo</title>
 <style>
 :root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
 * { box-sizing:border-box; }
@@ -30,8 +30,8 @@ th { background:var(--code-bg); }
 </head>
 <body>
 
-<h1>Lesson 6: AWS への初回デプロイ</h1>
-<p class="meta">SST / OpenNext / Aurora Serverless v2 ｜ 目安 Day 14–16（約 3 時間）＝ 既知の山場その 2</p>
+<h1>Lesson 7: AWS への初回デプロイ</h1>
+<p class="meta">SST / OpenNext / Aurora Serverless v2 ｜ 目安 Day 22–24（約 3 時間）＝ 既知の山場その 2</p>
 
 <h2>ゴール</h2>
 <p>ここまでのアプリ（認証＋CRUD＋タグ）が、CloudFront の URL で Aurora を DB として動いている状態。</p>
@@ -47,7 +47,7 @@ th { background:var(--code-bg); }
 <p>遊び終わったら <code>pnpm dlx sst remove</code> で全リソースを削除できます（これも IaC の学びの一部）。</p>
 </div>
 
-<h2>Day 14: SST の初期化と構成</h2>
+<h2>Day 22: SST の初期化と構成</h2>
 
 <h3>1. 初期化</h3>
 <pre><code>pnpm dlx sst@latest init</code></pre>
@@ -124,10 +124,10 @@ export const db = drizzle(pool, { schema });</code></pre>
 本格運用では RDS Proxy を挟みますが、トレーニング用途では <code>max: 1</code> で十分。</p>
 </div>
 
-<h2>Day 15: デプロイとマイグレーション</h2>
+<h2>Day 23: デプロイとマイグレーション</h2>
 
 <h3>4. シークレットの登録とデプロイ</h3>
-<pre><code>pnpm dlx sst secret set OpenaiApiKey sk-xxxx --stage dev   # 値は Lesson 7 まで仮でも可
+<pre><code>pnpm dlx sst secret set OpenaiApiKey sk-xxxx --stage dev   # 値は Lesson 8 まで仮でも可
 pnpm dlx sst deploy --stage dev</code></pre>
 <p><strong>初回は 15〜30 分かかります</strong>（Aurora クラスタと CloudFront の作成が遅い）。コーヒーを淹れながら、出力されるリソース名を眺めて「何が作られているか」を追ってください。完了すると CloudFront の URL が表示されます。</p>
 
@@ -156,7 +156,7 @@ pnpm dlx sst deploy --stage dev</code></pre>
 });</code></pre>
 <p>（<code>process.env.BETTER_AUTH_SECRET</code> は <code>sst.config.ts</code> の実行時に <code>.env</code> から読まれます——SST は <code>.env</code> を自動ロードします。きれいにやるなら secret を <code>sst.Secret</code> にもう 1 本切る。URL は初回デプロイ後に判明するので、2 回目のデプロイで設定する流れで OK）</p>
 
-<h2>Day 16: 動作確認と後片付けの練習</h2>
+<h2>Day 24: 動作確認と後片付けの練習</h2>
 
 <h3>7. 本番相当での動作確認</h3>
 <p>CloudFront URL でサインアップ〜todo 作成〜タグ付けまで一通り実行します。</p>
@@ -175,7 +175,7 @@ pnpm dlx sst deploy --stage dev</code></pre>
 <li>ステージ指定なしの <code>pnpm dlx sst dev</code> は <strong>personal ステージ（ユーザー名）に別スタックを新規作成</strong>します。VPC と Aurora クラスタがもう 1 組でき、課金も増えます。かといってデプロイ済みの dev ステージと <code>sst dev</code> を同一ステージで共用するのも非推奨です。</li>
 <li>手順 3 の <code>buildConnectionConfig()</code> は <code>DATABASE_URL</code> を優先するため、<code>.env</code> に <code>DATABASE_URL</code> がある限り、<code>sst dev</code> で起動しても接続先は Docker Postgres のままです。</li>
 </ul>
-<p>したがって Lesson 7〜8 の開発は <strong>Docker Postgres 相手の <code>pnpm dev</code></strong> で進めます。<code>sst dev</code> を試すのは自由ですが、終わったら personal ステージのリソースを <code>pnpm dlx sst remove</code> で必ず片付けてください。</p>
+<p>したがって Lesson 8〜9 の開発は <strong>Docker Postgres 相手の <code>pnpm dev</code></strong> で進めます。<code>sst dev</code> を試すのは自由ですが、終わったら personal ステージのリソースを <code>pnpm dlx sst remove</code> で必ず片付けてください。</p>
 
 <div class="box check">
 <p><strong>チェックポイント</strong></p>
@@ -205,8 +205,8 @@ pnpm dlx sst deploy --stage dev</code></pre>
 </ul>
 
 <div class="nav">
-<span><a href="lesson-05-tags-many-to-many.html">← Lesson 5</a></span>
-<span><a href="lesson-07-openai-extraction.html">Lesson 7: ブレインダンプ抽出 →</a></span>
+<span><a href="lesson-06-tags-many-to-many.html">← Lesson 6</a></span>
+<span><a href="lesson-08-openai-extraction.html">Lesson 8: ブレインダンプ抽出 →</a></span>
 </div>
 
 </body>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lesson 4: Todos の CRUD と認可 — braindump-todo</title>
+<title>Lesson 5: Todos の CRUD と認可 — braindump-todo</title>
 <style>
 :root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
 * { box-sizing:border-box; }
@@ -31,14 +31,14 @@ pre code { background:none; padding:0; font-size:.8rem; }
 </head>
 <body>
 
-<h1>Lesson 4: Todos の CRUD と認可</h1>
-<p class="meta">Conform / Zod / Server Actions / Drizzle ｜ 目安 Day 8–10（約 3 時間）</p>
+<h1>Lesson 5: Todos の CRUD と認可</h1>
+<p class="meta">Conform / Zod / Server Actions / Drizzle / サービス層と認可の統合テスト ｜ 目安 Day 12–16（約 5 時間）</p>
 
 <h2>ゴール</h2>
 <p>ログインユーザーが自分の todo を作成・一覧・完了切替・削除でき、他人の todo には一切触れない状態。</p>
 
 <div class="wireframe">
-<p class="wf-title">ワイヤーフレーム：/todos — 作成フォーム＋一覧（タグ表示は Lesson 5 で実装）</p>
+<p class="wf-title">ワイヤーフレーム：/todos — 作成フォーム＋一覧（タグ表示は Lesson 6 で実装）</p>
 <div class="wf-card" style="width:560px" data-screen-label="/todos">
 <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1.5px solid #555;background:#f2f2f2">
   <div style="display:flex;gap:4px"><span style="width:8px;height:8px;border:1.5px solid #999;border-radius:50%"></span><span style="width:8px;height:8px;border:1.5px solid #999;border-radius:50%"></span></div>
@@ -105,7 +105,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 </ul>
 </div>
 
-<h2>Day 8: スキーマと作成フォーム</h2>
+<h2>Day 12: スキーマと作成フォーム</h2>
 
 <h3>1. インストールと Zod スキーマ</h3>
 <pre><code>pnpm add @conform-to/react @conform-to/zod zod@3</code></pre>
@@ -189,7 +189,7 @@ export function TodoForm() {
 また <code>getFormProps(form)</code> に含まれる <code>noValidate</code> により、ブラウザ標準の検証を切って Zod に一本化しています。</p>
 </div>
 
-<h2>Day 9: 一覧表示（Read）</h2>
+<h2>Day 13: 一覧表示（Read）</h2>
 
 <h3>4. 一覧ページ</h3>
 <p><code>src/app/todos/page.tsx</code>。Server Component から直接 Drizzle を呼びます。</p>
@@ -225,41 +225,159 @@ export default async function TodosPage() {
 取得段階で他人のデータがプロセスに入ってこないようにするのが認可の第一原則です。</p>
 </div>
 
-<h2>Day 10: 更新・削除と所有者チェック</h2>
+<h2>Day 14: 更新・削除をサービス層に抽出し、所有者チェックを寄せる</h2>
 
-<h3>5. 完了切替と削除の Server Action</h3>
-<p><code>actions.ts</code> に追記。単純な操作は Conform を通さず、<code>bind</code> で ID を渡す素朴な形で十分です。</p>
+<h3>5. ロジックをサービス層に抽出する</h3>
+<p>完了切替・削除の本体を、<code>next/*</code> に一切依存しない<strong>サービス関数</strong>として <code>src/features/todos/service.ts</code> に切り出します。
+DB ハンドル（<code>db</code> でも transaction の <code>tx</code> でも）・<code>userId</code>・対象 id を引数で受け取り、所有者チェックの複合 WHERE はここに置きます：</p>
 <pre><code>import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+
+// db でも transaction でも受けられるように型を緩める
+type Database = typeof db | Parameters&lt;Parameters&lt;typeof db.transaction&gt;[0]&gt;[0];
+
+export async function toggleTodoStatusForUser(
+  database: Database,
+  userId: string,
+  todoId: string,
+) {
+  const todo = await database.query.todos.findFirst({
+    where: and(eq(todos.id, todoId), eq(todos.userId, userId)),
+  });
+  if (!todo) return { updated: false };
+
+  await database
+    .update(todos)
+    .set({ status: todo.status === "open" ? "done" : "open", updatedAt: new Date() })
+    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)));
+  return { updated: true };
+}
+
+export async function deleteTodoForUser(
+  database: Database,
+  userId: string,
+  todoId: string,
+) {
+  const deleted = await database
+    .delete(todos)
+    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)))
+    .returning({ id: todos.id });
+  return { deleted: deleted.length &gt; 0 };
+}</code></pre>
+
+<h3>6. Server Action は薄いガワにする</h3>
+<p><code>actions.ts</code> は「<code>requireUserId</code> → サービス呼び出し → <code>revalidatePath</code>」だけに保ちます。Conform を通さない単純操作なので、<code>bind</code> で id を渡す素朴な形で十分です：</p>
+<pre><code>import { db } from "@/db";
+import { requireUserId } from "@/lib/session";
+import { deleteTodoForUser, toggleTodoStatusForUser } from "./service";
 
 export async function toggleTodoStatus(todoId: string) {
   const userId = await requireUserId();
-  const todo = await db.query.todos.findFirst({
-    where: and(eq(todos.id, todoId), eq(todos.userId, userId)),
-  });
-  if (!todo) throw new Error("Not found");
-
-  await db.update(todos)
-    .set({ status: todo.status === "open" ? "done" : "open", updatedAt: new Date() })
-    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)));
+  await toggleTodoStatusForUser(db, userId, todoId);
   revalidatePath("/todos");
 }
 
 export async function deleteTodo(todoId: string) {
   const userId = await requireUserId();
-  await db.delete(todos)
-    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)));
+  await deleteTodoForUser(db, userId, todoId);
   revalidatePath("/todos");
 }</code></pre>
 
 <div class="box learn">
-<p><strong>学びどころ：所有者チェックの型 —「id だけで WHERE しない」</strong></p>
+<p><strong>学びどころ：所有者チェックの型 —「id だけで WHERE しない」（ロジックはサービス関数側に置く）</strong></p>
 <p>更新・削除の WHERE は常に <code>and(eq(id, ...), eq(userId, ...))</code> の複合条件にします。
 「先に SELECT して所有者を確かめてから UPDATE」でも間違いではありませんが、WHERE に含める形なら
 <strong>チェックと操作が単一のクエリで原子的</strong>になり、書き忘れも起きにくい。今回のアプリ全編を貫く型です。</p>
+<p>この認可ロジックを Server Action ではなく <code>service.ts</code> に抜き出したのは、<strong>この分離が <code>next/*</code>（<code>requireUserId</code>・<code>revalidatePath</code>）をモックせずにテストできる理由でもある</strong>からです。
+サービス関数は DB ハンドルと userId を引数で受けるだけの純粋なロジックなので、Lesson 4 の実 DB ハーネスにそのまま渡して検証できます。
+認可はこのアプリのセキュリティの核心——目視では抜け落ちるので、Day 15–16 で必ずテストで守ります。</p>
 </div>
 
-<h3>6. TodoItem コンポーネント</h3>
+<h3>7. TodoItem コンポーネント</h3>
 <p><code>src/features/todos/todo-item.tsx</code>（Client Component）。<code>toggleTodoStatus.bind(null, todo.id)</code> を <code>form action</code> に渡すだけの素朴な作りで十分です。チェックボックス＋タイトル＋削除ボタンを 1 行に並べます。</p>
+
+<h2>Day 15–16: 認可を統合テストで守る（★セキュリティ最重要）</h2>
+<p>「他人の todo に触れない」は、目視確認では最も抜けやすく、しかし漏れると最悪の欠陥です。
+Lesson 4 のハーネス（実 DB ＋ <code>seedUser</code> ＋ <code>beforeEach</code> の truncate）の上に、認可の統合テストを載せます。</p>
+
+<h3>8. 2 ユーザーを seed して境界を検証する</h3>
+<p><code>src/features/todos/service.test.ts</code>。サービス関数は DB ハンドルと userId を引数で受けるだけなので、<code>next/*</code> を一切モックせずに実 DB で検証できます：</p>
+<pre><code>import { beforeEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+import { seedUser } from "@/test/seed";
+import { deleteTodoForUser, toggleTodoStatusForUser } from "./service";
+
+let userA: string;
+let userB: string;
+let todoOfB: string;
+
+beforeEach(async () =&gt; {
+  userA = await seedUser("a@example.com");
+  userB = await seedUser("b@example.com");
+  const [todo] = await db
+    .insert(todos)
+    .values({ userId: userB, title: "B のタスク" })
+    .returning();
+  todoOfB = todo.id;
+});
+
+describe("削除の認可", () =&gt; {
+  it("他人（A）は B の todo を削除できない", async () =&gt; {
+    const result = await deleteTodoForUser(db, userA, todoOfB);
+
+    expect(result.deleted).toBe(false);
+    // B の todo は残っている
+    const rows = await db.select().from(todos).where(eq(todos.id, todoOfB));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("所有者（B）自身は削除できる", async () =&gt; {
+    const result = await deleteTodoForUser(db, userB, todoOfB);
+
+    expect(result.deleted).toBe(true);
+    const rows = await db.select().from(todos).where(eq(todos.id, todoOfB));
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe("完了切替の認可", () =&gt; {
+  it("他人（A）は B の todo を切り替えられない", async () =&gt; {
+    const result = await toggleTodoStatusForUser(db, userA, todoOfB);
+
+    expect(result.updated).toBe(false);
+    const [row] = await db.select().from(todos).where(eq(todos.id, todoOfB));
+    expect(row.status).toBe("open"); // 変わっていない
+  });
+});</code></pre>
+
+<h3>9. 一覧が WHERE userId で分離されることを検証する</h3>
+<p>一覧取得（Day 13）の <code>where: eq(todos.userId, userId)</code> が、他人の行を混ぜないことも実 DB で確かめます：</p>
+<pre><code>describe("一覧取得の分離", () =&gt; {
+  it("自分の todo だけが返り、他人の分は混ざらない", async () =&gt; {
+    await db.insert(todos).values({ userId: userA, title: "A のタスク" });
+
+    const listForA = await db
+      .select()
+      .from(todos)
+      .where(eq(todos.userId, userA));
+
+    expect(listForA).toHaveLength(1);
+    expect(listForA[0].title).toBe("A のタスク");
+    // beforeEach で入れた B の todo は含まれない
+    expect(listForA.every((t) =&gt; t.userId === userA)).toBe(true);
+  });
+});</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：認可テストは「他人になりすまして操作を試みる」形で書く</strong></p>
+<p>認可のテストの勘所は、<strong>成功ケースより「攻撃者（別ユーザー）が操作を試みて失敗する」ケース</strong>にあります。
+<code>deleteTodoForUser(db, userA, todoOfB)</code> のように「A の資格で B の資源を触ろうとする」呼び出しが、
+戻り値でも DB の実状態でも弾かれていることを両方 assert する。
+複合 WHERE の <code>eq(userId, ...)</code> を誰かがうっかり消しても、このテストが赤くなって気づけます——これが回帰テストで認可を守るということです。</p>
+</div>
 
 <div class="box check">
 <p><strong>チェックポイント</strong></p>
@@ -268,6 +386,7 @@ export async function deleteTodo(todoId: string) {
 <li>タイトル空で送信 → クライアントで即エラー表示。さらに JS を無効化して送信してもサーバーで弾かれる（二重検証の確認）</li>
 <li>ユーザーを 2 人作り、互いの todo が見えないこと・触れないことを確認</li>
 <li>DevTools から他人の todoId で削除アクションを叩いても失敗する</li>
+<li><code>pnpm test</code> で認可・一覧分離の統合テストが緑になる（上の 2 項目を自動化したもの。今後の回帰はこのテストが守る）</li>
 </ul>
 </div>
 
@@ -287,8 +406,8 @@ export async function deleteTodo(todoId: string) {
 </ul>
 
 <div class="nav">
-<span><a href="lesson-03-better-auth.html">← Lesson 3</a></span>
-<span><a href="lesson-05-tags-many-to-many.html">Lesson 5: タグ（多対多） →</a></span>
+<span><a href="lesson-04-testing-foundation.html">← Lesson 4</a></span>
+<span><a href="lesson-06-tags-many-to-many.html">Lesson 6: タグ（多対多） →</a></span>
 </div>
 
 </body>

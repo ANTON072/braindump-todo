@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4: テスト基盤（Vitest × テスト用DB） — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+.diamond { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1.2rem; margin:1.2rem 0; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.diamond .tier { border-radius:6px; text-align:center; font-size:12px; padding:8px 10px; color:#fff; }
+.diamond .cap { font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 4: テスト基盤（Vitest × テスト用DB）</h1>
+<p class="meta">Vitest / Docker（テスト用 PostgreSQL）/ 統合テストのハーネス ｜ 目安 Day 8–11（約 4 時間）</p>
+
+<h2>ゴール</h2>
+<p>実 DB に対して走る統合テストの土台ができ、<code>pnpm test</code> がスモークテスト 1 本で緑になる状態。
+以降の Lesson 5・6 で書く認可・upsert のテストは、すべてこの基盤の上に載せます。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：このアプリのテストは「ダイヤモンド型」で積む</strong></p>
+<div class="diamond">
+<div class="tier" style="width:150px;background:#8250df">E2E（Playwright）</div>
+<div class="tier" style="width:420px;background:#1a7f37">統合テスト（サービス関数 × 実 DB）</div>
+<div class="tier" style="width:230px;background:#57606a">ユニット（純粋関数）</div>
+<p class="cap">上下は薄く、中央（実 DB に対する統合）を最も太くする</p>
+</div>
+<p>ピラミッド（ユニットが最厚）ではなく<strong>ダイヤモンド</strong>にするのは、このアプリで守りたい価値——
+<strong>認可（他人の todo に触れない）・タグ upsert（再利用と cascade）・トランザクション境界</strong>——が、
+関数単体ではなく「実際の DB に対して SQL が正しく効いているか」でしか検証できないからです。
+モックした DB でユニットテストを厚く書いても、この核心は守れません。</p>
+<p>テスト対象は次の 2 種類に絞ります：</p>
+<ul>
+<li><strong>純粋ヘルパー</strong>（<code>normalizeTagNames</code>・<code>todoSchema</code> の境界値）→ ユニット（下・薄）。</li>
+<li><strong>サービス関数</strong>（<code>createTodoForUser</code> など、<code>next/*</code> に依存しないロジック）→ 実 DB に対する統合（中央・太）。</li>
+</ul>
+</div>
+
+<div class="box learn">
+<p><strong>学びどころ：Server Component はユニットテストしない（公式の推奨に従う）</strong></p>
+<p>Next.js 公式ドキュメントは、<strong><code>async</code> Server Component はユニットテストより E2E を推奨</strong>すると明言しています——
+「<em>Since <code>async</code> Server Components are new to the React ecosystem, some tools do not fully support them. In the meantime, we recommend using End-to-End Testing over Unit Testing for <code>async</code> components.</em>」。
+Vitest も現状 <code>async</code> Server Component を未サポートです。</p>
+<p>本アプリの <code>app/todos/page.tsx</code> は「<code>requireUserId()</code> → <code>db.query</code> → 描画」という薄いガワにすぎず、
+テストしたい認可・upsert・トランザクションは <strong>Server Action と DB ヘルパー側</strong>にあります。
+だから <strong>Server Component は E2E（Lesson 10）だけで担保</strong>し、ロジックはサービス層に抽出して統合テストする——という切り分けが公式推奨と一致します。</p>
+</div>
+
+<h2>Day 8: Vitest を入れて最小設定で緑にする</h2>
+
+<h3>1. インストール</h3>
+<pre><code>pnpm add -D vitest vite-tsconfig-paths dotenv-cli</code></pre>
+<p><code>vite-tsconfig-paths</code> は <code>@/*</code> のパスエイリアスを Vitest でも解決するため。<code>dotenv-cli</code> は後述のテスト DB へのマイグレーションで使います。</p>
+
+<h3>2. vitest.config.ts</h3>
+<p>リポジトリ直下に作成します。<strong>環境は <code>node</code></strong>（DOM は要らない。テスト対象はサーバー側のロジックと DB）：</p>
+<pre><code>import { config } from "dotenv";
+import { defineConfig } from "vitest/config";
+import tsconfigPaths from "vite-tsconfig-paths";
+
+// テスト用の接続情報などを読み込む
+config({ path: ".env.test" });
+
+export default defineConfig({
+  plugins: [tsconfigPaths()],
+  test: {
+    environment: "node",
+    setupFiles: ["./src/test/setup.ts"],
+    // 統合テストは同じ DB を共有するので、ファイル間を直列に走らせる
+    fileParallelism: false,
+  },
+});</code></pre>
+
+<h3>3. package.json にスクリプト</h3>
+<pre><code>"scripts": {
+  "test": "vitest"
+}</code></pre>
+<p>この時点で <code>pnpm test</code> を叩くと「テストが無い」と言われます。DB の準備を整えてから最初の 1 本を書きます。</p>
+
+<h2>Day 9: テスト用 DB を Docker で開発用と分離する</h2>
+
+<div class="box warn">
+<p><strong>なぜ DB を分けるのか</strong></p>
+<p>統合テストは <code>beforeEach</code> でテーブルを <strong>TRUNCATE</strong> します。もし開発用 DB に対して走らせたら、
+手で入れた確認用データが毎回消えます。<strong>テスト用 DB は開発用と物理的に別ポート・別 DB</strong> にして、
+「テストが触ってよいのはテスト DB だけ」を仕組みで保証します。</p>
+</div>
+
+<h3>4. compose.yaml にテスト用サービスを足す</h3>
+<p>Lesson 2 の <code>compose.yaml</code> に <code>db_test</code> を追加します（別ポート <code>5433</code>・別 DB 名）：</p>
+<pre><code>services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: braindump_todo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  db_test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: braindump_todo_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data   # テスト DB は揮発でよい（tmpfs で高速化・永続化しない）
+volumes:
+  pgdata:</code></pre>
+<pre><code>docker compose up -d</code></pre>
+
+<h3>5. .env.test に接続先を書く</h3>
+<p>リポジトリ直下に <code>.env.test</code>（<code>.env</code> と同様 gitignore 対象にする）：</p>
+<pre><code>TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5433/braindump_todo_test</code></pre>
+
+<h3>6. @/db を env で接続先切替できる形にする</h3>
+<p>Lesson 2 の <code>src/db/index.ts</code> を、テスト時だけ接続先を切り替えられるようにします。<code>drizzle(pool, { schema })</code> の形はそのまま：</p>
+<pre><code>import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import * as schema from "./schema";
+
+// テスト実行時は TEST_DATABASE_URL を最優先で使う。
+// これが「開発 DB を誤って触らない」第一のガードになる。
+const connectionString = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+if (!connectionString) throw new Error("DATABASE_URL is not set");
+
+const pool = new Pool({ connectionString });
+
+export const db = drizzle(pool, { schema });</code></pre>
+<p>通常の <code>pnpm dev</code> では <code>TEST_DATABASE_URL</code> は未定義なので <code>DATABASE_URL</code>（開発用 Docker）を使い、
+Vitest では <code>.env.test</code> が <code>TEST_DATABASE_URL</code> を与えるのでテスト DB に向きます。</p>
+
+<h2>Day 10: マイグレーション適用と truncate ハーネス</h2>
+
+<h3>7. テスト DB にスキーマを適用する</h3>
+<p>テスト DB は生まれたての空なので、スキーマを流し込みます。テストでは履歴管理は不要なので、素早い <code>push</code> で十分です。
+テスト用の drizzle 設定を 1 枚足します。<code>drizzle.test.config.ts</code>：</p>
+<pre><code>import { config } from "dotenv";
+import { defineConfig } from "drizzle-kit";
+
+config({ path: ".env.test" });
+
+export default defineConfig({
+  schema: "./src/db/schema.ts",
+  out: "./drizzle",
+  dialect: "postgresql",
+  dbCredentials: { url: process.env.TEST_DATABASE_URL! },
+});</code></pre>
+<p>package.json にスクリプトを足して実行します：</p>
+<pre><code>"db:push:test": "drizzle-kit push --config drizzle.test.config.ts"</code></pre>
+<pre><code>pnpm db:push:test</code></pre>
+<p>スキーマ（Lesson 2・3 で定義した <code>user</code> / <code>todos</code> / <code>tags</code> / <code>todos_to_tags</code> など）が変わるたびに、
+このコマンドでテスト DB を追従させます。</p>
+
+<h3>8. truncate ハーネス（テスト間の独立性）</h3>
+<p><code>src/test/setup.ts</code>。全テストの前に共通で走る設定です：</p>
+<pre><code>import { beforeEach } from "vitest";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
+
+// 第二のガード：TEST_DATABASE_URL が無ければ即座に落とす。
+// 開発 DB を空にする事故を、TRUNCATE に到達する前に止める。
+if (!process.env.TEST_DATABASE_URL) {
+  throw new Error(
+    "TEST_DATABASE_URL が未設定です。テストはテスト用 DB でのみ実行してください。",
+  );
+}
+
+beforeEach(async () =&gt; {
+  // "user" は SQL 予約語なので必ずクォートする。
+  // RESTART IDENTITY で連番をリセット、CASCADE で依存テーブル（session 等）も一括で空にする。
+  await db.execute(
+    sql`TRUNCATE TABLE "user", todos, tags, todos_to_tags RESTART IDENTITY CASCADE`,
+  );
+});</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：なぜ「モック」ではなく「実 DB を truncate」なのか</strong></p>
+<p>DB をモックすると、検証したい肝心の部分——<code>onConflictDoNothing</code> がユニーク制約に本当に衝突するか、
+<code>onDelete: "cascade"</code> が本当に中間テーブルを消すか、複合 WHERE が本当に他人の行を除外するか——が
+<strong>すべてモックの作り物</strong>になり、テストの意味が消えます。
+実 DB に対して <code>beforeEach</code> で空にしながら走らせれば、「本物の PostgreSQL がどう振る舞うか」をそのまま検証できます。
+これがダイヤモンドの中央を実 DB で太く積む理由です。</p>
+</div>
+
+<h3>9. ユーザー seed ヘルパー</h3>
+<p>Lesson 3 で <code>todos.userId</code> / <code>tags.userId</code> は <code>user.id</code> への FK を張りました。
+そのため todo やタグを入れる前に、必ず対応する user 行が要ります。以降のテストで使い回すヘルパーを用意します。<code>src/test/seed.ts</code>：</p>
+<pre><code>import { db } from "@/db";
+import { user } from "@/db/schema";
+
+// Better Auth の user テーブルに最小限の行を作り、その id を返す
+export async function seedUser(email: string): Promise&lt;string&gt; {
+  const id = crypto.randomUUID();
+  await db.insert(user).values({
+    id,
+    name: email.split("@")[0],
+    email,
+    emailVerified: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  return id;
+}</code></pre>
+
+<h2>Day 11: 最初のスモーク統合テスト</h2>
+
+<h3>10. ハーネスが DB まで通ることを証明する</h3>
+<p><code>src/db/schema.test.ts</code>。1 テーブルへ insert → select し直して assert するだけの最小テストです：</p>
+<pre><code>import { describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { tags } from "@/db/schema";
+import { seedUser } from "@/test/seed";
+
+describe("テストハーネスの疎通", () =&gt; {
+  it("insert したタグを select し直せる", async () =&gt; {
+    const userId = await seedUser("smoke@example.com");
+
+    await db.insert(tags).values({ userId, name: "買い物" });
+
+    const rows = await db
+      .select()
+      .from(tags)
+      .where(and(eq(tags.userId, userId), eq(tags.name, "買い物")));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("買い物");
+  });
+});</code></pre>
+<pre><code>pnpm test</code></pre>
+<p>緑になれば、「Vitest → <code>@/db</code> → テスト DB → SQL 実行 → 結果を assert」の一本道が通ったことの証明です。
+Lesson 5・6 はこの上に認可・upsert のテストを載せていきます。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li><code>docker compose up -d</code> で <code>db</code>（5432）と <code>db_test</code>（5433）の 2 つが立っている</li>
+<li><code>pnpm db:push:test</code> でテスト DB にテーブルが作られる（Drizzle Studio 等で 5433 を覗いて確認）</li>
+<li><code>pnpm test</code> がスモークテスト 1 本で緑になる</li>
+<li>開発用 DB（5432）に手で入れたデータが、テストを走らせても消えていない（＝別 DB になっている証拠）</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li><strong>接続先ガードを外さない。</strong><code>setup.ts</code> の <code>TEST_DATABASE_URL</code> チェックと、<code>db/index.ts</code> の切替。この 2 段のガードが「本番・開発 DB を誤って TRUNCATE する」最悪の事故を防ぐ。ローカルの小さなミスが CI で本番 DB を消す、が最も怖い。</li>
+<li><code>vitest.config.ts</code> の <code>environment</code> を <code>node</code> にする。既定の <code>jsdom</code> のままだと <code>pg</code> の接続まわりで不可解なエラーになる。</li>
+<li><code>@/db</code> が解決できない（<code>Cannot find module</code>）場合は <code>vite-tsconfig-paths</code> の plugin 登録忘れ。</li>
+<li>スキーマを変えたのにテストが古いカラムで落ちるときは <code>pnpm db:push:test</code> の流し忘れ。テスト DB は自動追従しない。</li>
+<li>ポート 5433 が既に使われていると <code>db_test</code> が起動しない。<code>docker compose ps</code> で状態を確認する。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://nextjs.org/docs/app/guides/testing">Next.js — Testing（Unit と E2E の使い分け）</a></li>
+<li><a href="https://nextjs.org/docs/app/guides/testing/vitest">Next.js — Vitest セットアップ（async Server Component は未サポートの明記）</a></li>
+<li><a href="https://vitest.dev/config/">Vitest — Configuration</a></li>
+<li><a href="https://orm.drizzle.team/docs/drizzle-kit-push">Drizzle Kit — push</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-03-better-auth.html">← Lesson 3</a></span>
+<span><a href="lesson-05-todos-crud.html">Lesson 5: Todos の CRUD と認可 →</a></span>
+</div>
+
+</body>
+</html>

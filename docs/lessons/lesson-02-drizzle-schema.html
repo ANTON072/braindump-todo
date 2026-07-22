@@ -34,7 +34,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <p>ローカルの Docker PostgreSQL に対して、todos / tags / todos_to_tags のテーブルがマイグレーションで作成され、Drizzle Studio で中身を覗ける状態。</p>
 
 <div class="box">
-<p><strong>方針：</strong>Lesson 5 までは<strong>ローカルの Docker PostgreSQL</strong> で開発します。Aurora は Lesson 6 で登場します。
+<p><strong>方針：</strong>Lesson 6 までは<strong>ローカルの Docker PostgreSQL</strong> で開発します。Aurora は Lesson 7 で登場します。
 DB の向き先を接続文字列 1 本（<code>DATABASE_URL</code>）に寄せておくことで、後から Aurora に差し替えやすくします。</p>
 </div>
 
@@ -132,7 +132,7 @@ export const todosToTags = pgTable(
 <p><strong>学びどころ：多対多の 3 点セット</strong></p>
 <ul>
 <li><strong>中間テーブル＋複合主キー</strong> — <code>primaryKey({ columns: [todoId, tagId] })</code> により「同じ todo に同じタグを二重に付ける」ことが DB レベルで不可能になる。アプリ側の防御より強い保証。</li>
-<li><strong>複合ユニーク制約</strong> — <code>tags(userId, name)</code> のユニークインデックスが Lesson 5 の upsert（<code>onConflictDoNothing</code>）の衝突判定の土台になる。<strong>upsert は「ユニーク制約があって初めて成立する」</strong>と覚える。</li>
+<li><strong>複合ユニーク制約</strong> — <code>tags(userId, name)</code> のユニークインデックスが Lesson 6 の upsert（<code>onConflictDoNothing</code>）の衝突判定の土台になる。<strong>upsert は「ユニーク制約があって初めて成立する」</strong>と覚える。</li>
 <li><strong><code>onDelete: "cascade"</code></strong> — todo を消せば紐付け行も自動で消える。中間テーブルの掃除をアプリコードでやらずに済む。</li>
 </ul>
 </div>
@@ -161,7 +161,7 @@ export const todosToTagsRelations = relations(todosToTags, ({ one }) =&gt; ({
 <div class="box learn">
 <p><strong>学びどころ：<code>relations()</code> は多対多では「1 対多を 2 回」書く</strong></p>
 <p>Drizzle には「many-to-many」を一発で書く構文はなく、<code>todos → todosToTags</code>（1対多）と <code>todosToTags → tags</code>（多対1）を組み合わせます。
-そのため取得時のネストも <code>with: { todosToTags: { with: { tag: true } } }</code> と 2 段になります（Lesson 5 で実践）。</p>
+そのため取得時のネストも <code>with: { todosToTags: { with: { tag: true } } }</code> と 2 段になります（Lesson 6 で実践）。</p>
 </div>
 
 <h3>6. マイグレーションの生成と適用</h3>
