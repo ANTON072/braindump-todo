@@ -20,6 +20,10 @@ th { background:var(--code-bg); }
 .box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
 .box.warn { border-left-color:#d1242f; background:#fff5f5; }
 .box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.wireframe { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1rem 1.2rem 1.2rem; margin:1.2rem 0; overflow-x:auto; line-height:1.4; }
+.wireframe .wf-title { font-size:.8rem; font-weight:600; color:var(--muted); margin:0 0 .8rem; }
+.wf-card { background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; }
+.wf-notes { margin:.8rem 0 0; padding-left:16px; font-size:12px; line-height:1.6; color:#2a78d6; }
 </style>
 </head>
 <body>
@@ -49,6 +53,41 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <strong>必達コアが完成した Lesson 5 の直後にデプロイ（Lesson 6）</strong>を挟んでいます。
 万一 Lesson 7 以降で時間切れになっても「認証つき・タグつき Todo アプリが AWS で動いている」状態が確保されます。
 初回デプロイと Better Auth × Drizzle 接続は既知の山場なので、それぞれ 3 時間を確保しています。</p>
+</div>
+
+<h2>画面ワイヤーフレーム（全体フロー）</h2>
+<p>完成形は 4 画面です。各画面の詳細ワイヤーフレームは対応するレッスン（Lesson 3・4・5・7・8）の冒頭に掲載しています。</p>
+
+<div class="wireframe">
+<p class="wf-title">全体フロー（4 画面＋遷移）</p>
+<div class="wf-card" style="width:max-content;padding:18px 20px">
+<div style="display:flex;align-items:center;gap:10px">
+  <div style="width:120px;border:1.5px solid #555;border-radius:4px;background:#fff">
+    <div style="border-bottom:1.5px solid #555;padding:3px 7px;font-size:10px;background:#f2f2f2">ログイン</div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:7px;background:#e2e2e2;border-radius:2px"></div><div style="height:7px;background:#e2e2e2;border-radius:2px"></div><div style="height:9px;width:48px;background:#3a3a3a;border-radius:2px"></div></div>
+  </div>
+  <div style="text-align:center;font-size:10px;color:#777">認証成功<br>→</div>
+  <div style="width:130px;border:1.5px solid #555;border-radius:4px;background:#fff">
+    <div style="border-bottom:1.5px solid #555;padding:3px 7px;font-size:10px;background:#f2f2f2">/todos 一覧</div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:9px;background:#eee;border:1px dashed #aaa;border-radius:2px"></div><div style="height:7px;background:#e2e2e2;border-radius:2px"></div><div style="height:7px;background:#e2e2e2;border-radius:2px"></div><div style="height:7px;background:#e2e2e2;border-radius:2px"></div></div>
+  </div>
+  <div style="text-align:center;font-size:10px;color:#777">ナビ<br>⇄</div>
+  <div style="width:130px;border:1.5px solid #555;border-radius:4px;background:#fff">
+    <div style="border-bottom:1.5px solid #555;padding:3px 7px;font-size:10px;background:#f2f2f2">/braindump 入力</div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:26px;background:#fafafa;border:1px solid #bbb;border-radius:2px"></div><div style="height:9px;width:44px;background:#3a3a3a;border-radius:2px"></div></div>
+  </div>
+  <div style="text-align:center;font-size:10px;color:#777">抽出<br>(OpenAI)→</div>
+  <div style="width:130px;border:1.5px solid #555;border-radius:4px;background:#fff">
+    <div style="border-bottom:1.5px solid #555;padding:3px 7px;font-size:10px;background:#f2f2f2">確認・編集</div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:8px;background:#fafafa;border:1px solid #bbb;border-radius:2px"></div><div style="height:8px;background:#fafafa;border:1px solid #bbb;border-radius:2px"></div><div style="height:8px;background:#fafafa;border:1px solid #bbb;border-radius:2px"></div><div style="height:9px;width:52px;background:#3a3a3a;border-radius:2px"></div></div>
+  </div>
+  <div style="text-align:center;font-size:10px;color:#777">すべて保存<br>→ /todos</div>
+</div>
+</div>
+<ul class="wf-notes">
+<li>保存は 1 トランザクション（all-or-nothing）→ 成功で /todos へ redirect（Lesson 8）</li>
+<li>未ログインで /todos・/braindump にアクセス → ログインへリダイレクト（requireUserId）</li>
+</ul>
 </div>
 
 <h2>事前準備（Lesson 1 の前に）</h2>

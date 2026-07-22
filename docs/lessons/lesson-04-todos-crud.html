@@ -23,6 +23,10 @@ pre code { background:none; padding:0; font-size:.8rem; }
 .box.check { border-left-color:#1a7f37; background:#f2fbf5; }
 .box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
 .nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+.wireframe { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1rem 1.2rem 1.2rem; margin:1.2rem 0; overflow-x:auto; line-height:1.4; }
+.wireframe .wf-title { font-size:.8rem; font-weight:600; color:var(--muted); margin:0 0 .8rem; }
+.wf-card { background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; }
+.wf-notes { margin:.8rem 0 0; padding-left:16px; font-size:12px; line-height:1.6; color:#2a78d6; }
 </style>
 </head>
 <body>
@@ -32,6 +36,64 @@ pre code { background:none; padding:0; font-size:.8rem; }
 
 <h2>ゴール</h2>
 <p>ログインユーザーが自分の todo を作成・一覧・完了切替・削除でき、他人の todo には一切触れない状態。</p>
+
+<div class="wireframe">
+<p class="wf-title">ワイヤーフレーム：/todos — 作成フォーム＋一覧（タグ表示は Lesson 5 で実装）</p>
+<div class="wf-card" style="width:560px" data-screen-label="/todos">
+<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1.5px solid #555;background:#f2f2f2">
+  <div style="display:flex;gap:4px"><span style="width:8px;height:8px;border:1.5px solid #999;border-radius:50%"></span><span style="width:8px;height:8px;border:1.5px solid #999;border-radius:50%"></span></div>
+  <div style="flex:1;border:1px solid #bbb;border-radius:3px;padding:2px 8px;font-size:11px;color:#888;background:#fff">app.example.com<b style="color:#333">/todos</b></div>
+</div>
+<div style="display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1.5px solid #ddd">
+  <b style="font-size:14px">braindump-todo</b>
+  <nav style="display:flex;gap:12px;font-size:12px"><span style="border-bottom:2px solid #333;font-weight:600">Todos</span><span style="color:#888">Braindump</span></nav>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:#888"><span>user@example.com</span><span style="border:1px solid #aaa;border-radius:3px;padding:1px 7px">ログアウト</span></div>
+</div>
+<div style="padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+  <div style="border:1.5px solid #999;border-radius:5px;padding:12px;display:flex;flex-direction:column;gap:8px;background:#fbfbfb">
+    <div style="border:1.5px solid #aaa;border-radius:3px;padding:6px 9px;font-size:12px;color:#9a9a9a;background:#fff">タイトル *</div>
+    <div style="display:flex;gap:8px">
+      <div style="width:130px;border:1.5px solid #aaa;border-radius:3px;padding:6px 9px;font-size:12px;color:#9a9a9a;background:#fff">期限（date）▾</div>
+      <div style="flex:1;border:1.5px solid #aaa;border-radius:3px;padding:6px 9px;font-size:12px;color:#9a9a9a;background:#fff">タグ（カンマ区切り: 買い物, 仕事）</div>
+      <div style="background:#3a3a3a;color:#fff;border-radius:4px;padding:6px 16px;font-size:12px;font-weight:600">追加</div>
+    </div>
+    <div style="font-size:11px;color:#c33">▲ タイトル必須 — エラーはフィールド直下に表示（Conform）</div>
+  </div>
+  <div style="display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px dashed #ccc">
+      <span style="width:15px;height:15px;border:1.5px solid #555;border-radius:3px"></span>
+      <span style="font-size:13px">歯医者に電話する</span>
+      <span style="font-size:10.5px;color:#888">期限 7/25</span>
+      <span style="border:1px solid #999;border-radius:999px;padding:0 8px;font-size:10px;background:#efefef">健康</span>
+      <span style="margin-left:auto;font-size:11px;color:#888;border:1px solid #bbb;border-radius:3px;padding:1px 8px">削除</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px dashed #ccc">
+      <span style="width:15px;height:15px;border:1.5px solid #555;border-radius:3px;background:#555;color:#fff;font-size:11px;line-height:15px;text-align:center">✓</span>
+      <span style="font-size:13px;text-decoration:line-through;color:#999">牛乳を買う</span>
+      <span style="border:1px solid #999;border-radius:999px;padding:0 8px;font-size:10px;background:#efefef">買い物</span>
+      <span style="margin-left:auto;font-size:11px;color:#888;border:1px solid #bbb;border-radius:3px;padding:1px 8px">削除</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px dashed #ccc">
+      <span style="width:15px;height:15px;border:1.5px solid #555;border-radius:3px"></span>
+      <span style="font-size:13px">金曜までにレポート提出</span>
+      <span style="font-size:10.5px;color:#888">期限 7/24</span>
+      <span style="border:1px solid #999;border-radius:999px;padding:0 8px;font-size:10px;background:#efefef">仕事</span>
+      <span style="border:1px solid #999;border-radius:999px;padding:0 8px;font-size:10px;background:#efefef">重要</span>
+      <span style="margin-left:auto;font-size:11px;color:#888;border:1px solid #bbb;border-radius:3px;padding:1px 8px">削除</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 4px">
+      <span style="width:15px;height:15px;border:1.5px solid #555;border-radius:3px"></span>
+      <span style="font-size:13px">Sam にメール</span>
+      <span style="margin-left:auto;font-size:11px;color:#888;border:1px solid #bbb;border-radius:3px;padding:1px 8px">削除</span>
+    </div>
+  </div>
+</div>
+</div>
+<ul class="wf-notes">
+<li>一覧は WHERE userId — 自分の todo のみ（新しい順）。チェックで open⇄done 切替、削除は物理削除</li>
+<li>タグは shadcn Badge。作成は todo INSERT＋タグ upsert を 1 トランザクションで</li>
+</ul>
+</div>
 
 <div class="box learn">
 <p><strong>学びどころ：Conform の設計思想（先にこれを理解する）</strong></p>

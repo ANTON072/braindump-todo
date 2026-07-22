@@ -23,6 +23,10 @@ pre code { background:none; padding:0; font-size:.8rem; }
 .box.check { border-left-color:#1a7f37; background:#f2fbf5; }
 .box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
 .nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+.wireframe { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1rem 1.2rem 1.2rem; margin:1.2rem 0; overflow-x:auto; line-height:1.4; }
+.wireframe .wf-title { font-size:.8rem; font-weight:600; color:var(--muted); margin:0 0 .8rem; }
+.wf-card { background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; }
+.wf-notes { margin:.8rem 0 0; padding-left:16px; font-size:12px; line-height:1.6; color:#2a78d6; }
 </style>
 </head>
 <body>
@@ -32,6 +36,30 @@ pre code { background:none; padding:0; font-size:.8rem; }
 
 <h2>ゴール</h2>
 <p>メール＋パスワードでサインアップ／ログイン／ログアウトでき、サーバー側でセッションからユーザー ID が取れる状態。</p>
+
+<div class="wireframe">
+<p class="wf-title">ワイヤーフレーム：ログイン／新規登録</p>
+<div class="wf-card" style="width:300px" data-screen-label="ログイン">
+<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1.5px solid #555;background:#f2f2f2">
+  <div style="flex:1;border:1px solid #bbb;border-radius:3px;padding:2px 8px;font-size:11px;color:#888;background:#fff">app.example.com<b style="color:#333">/login</b></div>
+</div>
+<div style="padding:22px 20px;display:flex;flex-direction:column;gap:10px">
+  <b style="font-size:15px;text-align:center">braindump-todo</b>
+  <div style="display:flex;border:1.5px solid #555;border-radius:4px;overflow:hidden;font-size:12px;text-align:center">
+    <div style="flex:1;padding:5px;background:#3a3a3a;color:#fff;font-weight:600">ログイン</div>
+    <div style="flex:1;padding:5px;color:#888">新規登録</div>
+  </div>
+  <div style="border:1.5px solid #aaa;border-radius:3px;padding:6px 9px;font-size:12px;color:#9a9a9a;background:#fff">メールアドレス</div>
+  <div style="border:1.5px solid #aaa;border-radius:3px;padding:6px 9px;font-size:12px;color:#9a9a9a;background:#fff">パスワード（8文字以上）</div>
+  <div style="background:#3a3a3a;color:#fff;border-radius:4px;padding:7px;font-size:12px;font-weight:600;text-align:center">ログイン</div>
+  <div style="font-size:10.5px;color:#888;text-align:center">新規登録タブ：＋名前フィールド → 登録後そのままログイン状態</div>
+</div>
+</div>
+<ul class="wf-notes">
+<li>Better Auth メール＋パスワード。成功で /todos へ</li>
+<li>保護ページは requireUserId() でガード</li>
+</ul>
+</div>
 
 <div class="box learn">
 <p><strong>学びどころ：Better Auth の全体像（先にこれを頭に入れる）</strong></p>
