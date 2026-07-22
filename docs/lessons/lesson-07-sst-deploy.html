@@ -95,6 +95,9 @@ export default $config({
 <p><code>src/db/index.ts</code> を、link された Aurora とローカル Docker の両対応にします：</p>
 <pre><code>import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+// Next.js 16（ESM / Turbopack）では require ではなく import で読む。
+// Resource は遅延評価の proxy なので、ローカルで触らなければ副作用はない。
+import { Resource } from "sst";
 import * as schema from "./schema";
 
 function buildConnectionConfig() {
@@ -103,7 +106,6 @@ function buildConnectionConfig() {
     return { connectionString: process.env.DATABASE_URL };
   }
   // SST 環境では link された Aurora から取る
-  const { Resource } = require("sst") as typeof import("sst");
   return {
     host: Resource.Database.host,
     port: Resource.Database.port,

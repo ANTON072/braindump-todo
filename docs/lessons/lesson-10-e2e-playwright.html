@@ -114,9 +114,9 @@ export default async function globalSetup() {
 }</code></pre>
 
 <div class="box warn">
-<p><strong>disableSignup との両立</strong></p>
-<p>Lesson 3 で <code>disableSignup: true</code> にすると <code>auth.api.signUpEmail</code> も 403 で弾かれます（seed-users.ts と同じ制約）。
-E2E で seed するには、<strong>disableSignup を環境変数で切り替え可能</strong>にして、テスト環境（<code>.env.test</code>）でだけ登録を許可するのが素直です。
+<p><strong>disableSignUp との両立</strong></p>
+<p>Lesson 3 の auth.ts は既定で <code>disableSignUp: true</code> なので、そのままでは <code>auth.api.signUpEmail</code> も 403 で弾かれます（seed-users.ts と同じ制約）。
+Lesson 3 で仕込んだ env 切り替え（<code>BETTER_AUTH_DISABLE_SIGNUP=false</code> のときだけ登録を許可）をここでも使い、テスト環境の <code>.env.test</code> に <code>BETTER_AUTH_DISABLE_SIGNUP=false</code> を足して登録を開けます。
 「本番は招待制、テストは seed 可能」を env で分けます。</p>
 </div>
 

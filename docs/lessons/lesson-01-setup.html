@@ -38,7 +38,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <h3>1. create-next-app</h3>
 <p>リポジトリ直下（<code>braindump-todo/</code>）で実行します。既存ディレクトリに展開するため <code>.</code> を指定します。</p>
 <pre><code>pnpm dlx create-next-app@latest . --typescript --tailwind --app --src-dir --import-alias "@/*"</code></pre>
-<p>質問には基本 Yes で答えて構いません（ESLint: Yes、Turbopack: Yes）。</p>
+<p>Turbopack は Yes。リンター／フォーマッタは、本プロジェクトでは ESLint ではなく <strong>Biome</strong> を採用します（<code>pnpm check</code> で <code>biome check</code> が走る）。create-next-app で Biome を選べればそれを、選べなければリンターなしで進め、後から Biome を導入して構いません。</p>
 
 <div class="box learn">
 <p><strong>学びどころ：App Router の頭の切り替え</strong></p>

@@ -268,7 +268,10 @@ export async function deleteTodoForUser(
 
 <h3>6. Server Action は薄いガワにする</h3>
 <p><code>actions.ts</code> は「<code>requireUserId</code> → サービス呼び出し → <code>revalidatePath</code>」だけに保ちます。Conform を通さない単純操作なので、<code>bind</code> で id を渡す素朴な形で十分です：</p>
-<pre><code>import { db } from "@/db";
+<pre><code>"use server";
+
+import { revalidatePath } from "next/cache";
+import { db } from "@/db";
 import { requireUserId } from "@/lib/session";
 import { deleteTodoForUser, toggleTodoStatusForUser } from "./service";
 
