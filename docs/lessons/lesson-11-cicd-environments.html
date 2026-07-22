@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11: CI/CD と環境昇格 — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+.pipeline { border:1px solid var(--border); border-radius:8px; background:#f0eee9; padding:1.2rem; margin:1.2rem 0; overflow-x:auto; }
+.pipeline .row { display:flex; align-items:center; gap:8px; font-size:12px; white-space:nowrap; }
+.pipeline .stage { border:1.5px solid #555; border-radius:5px; padding:6px 10px; background:#fff; }
+.pipeline .gate { color:#1a7f37; font-weight:600; }
+.pipeline .arrow { color:#777; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; }
+th { background:var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 11: CI/CD と環境昇格</h1>
+<p class="meta">GitHub Actions / SST の stage（dev・staging・production）/ 承認ゲート ｜ 目安 Day 33–37（約 5 時間）</p>
+
+<h2>ゴール</h2>
+<p>Pull Request を出すと <strong>lint・型チェック・テスト（ユニット／統合／E2E）が自動で回り</strong>、緑でなければマージできない。
+main にマージすると <strong>staging に自動デプロイ</strong>され、承認を挟んで <strong>production に昇格</strong>する。
+環境は dev（各自の手元）／ staging ／ production に分かれ、secret も環境ごとに管理される状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：CI と CD は別物。パイプラインは「速い門 → 遅い門 → デプロイ」</strong></p>
+<div class="pipeline">
+<div class="row">
+  <span class="stage">PR</span><span class="arrow">→</span>
+  <span class="stage gate">lint / typecheck / unit・統合</span><span class="arrow">→</span>
+  <span class="stage gate">E2E</span><span class="arrow">→</span>
+  <span class="stage">merge</span><span class="arrow">→</span>
+  <span class="stage">deploy staging</span><span class="arrow">→</span>
+  <span class="stage gate">承認</span><span class="arrow">→</span>
+  <span class="stage">deploy production</span>
+</div>
+</div>
+<ul>
+<li><strong>CI（継続的インテグレーション）</strong>＝ 変更のたびに自動検証する門。速いもの（lint・型・ユニット・統合）を先に、遅くて重い E2E を後に置き、<strong>落ちたら先へ進めない</strong>。</li>
+<li><strong>CD（継続的デリバリー）</strong>＝ 緑になった変更を環境へ運ぶ。staging へは自動、production へは<strong>人の承認</strong>を挟む。</li>
+</ul>
+<p>Lesson 4〜6・10 で書いたテストは、こうして<strong>自動で回して初めて意味が閉じます</strong>。手元で一度緑にして終わりでは、明日の自分や他人の変更を守れません。</p>
+</div>
+
+<h2>Day 33–34: CI — PR で検証を自動化する</h2>
+
+<h3>1. スクリプトを揃える</h3>
+<p><code>package.json</code> に、CI から呼ぶ入口を用意します（<code>lint</code> は Lesson 1 の <code>next lint</code>、型チェックを 1 本足す）：</p>
+<pre><code>"scripts": {
+  "lint": "next lint",
+  "typecheck": "tsc --noEmit",
+  "test": "vitest run",
+  "db:push:test": "drizzle-kit push --config drizzle.test.config.ts"
+}</code></pre>
+<p><strong>CI では <code>vitest run</code></strong>（1 回実行して終了）にします。ウォッチモードの <code>vitest</code> のままだと CI がハングします。</p>
+
+<h3>2. 速い門と統合テストのワークフロー</h3>
+<p><code>.github/workflows/ci.yml</code>。統合テストは実 DB が要るので、GitHub Actions の <strong>service コンテナ</strong>で PostgreSQL を立てます（Lesson 4 のテスト DB を CI 上に再現）：</p>
+<pre><code>name: CI
+on:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: braindump_todo_test
+        ports:
+          - 5433:5432
+        # DB が受付可能になるまで待つ（これが無いと接続拒否で不安定になる）
+        options: &gt;-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/braindump_todo_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:push:test    # テスト DB にスキーマを流す（Lesson 4）
+      - run: pnpm test</code></pre>
+
+<h3>3. E2E は重いので別ジョブに切る</h3>
+<p>同じ <code>ci.yml</code> にジョブを追加します。Playwright はブラウザの導入が要り、dev サーバも起動するので、速い門と分離して並行実行します：</p>
+<pre><code>  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: braindump_todo_test
+        ports: [ "5433:5432" ]
+        options: &gt;-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    env:
+      CI: "true"                 # playwright.config の reuseExistingServer:false を効かせる
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/braindump_todo_test
+      # dev サーバ起動に必要な最小 env（本物である必要はない）
+      BETTER_AUTH_SECRET: ci-dummy-secret-please-change
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_DISABLE_SIGNUP: "false"   # E2E の seed を許可（Lesson 10）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:push:test
+      - run: pnpm exec playwright test</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：ローカルの「テスト DB を分ける」設計が、そのまま CI に効く</strong></p>
+<p>Lesson 4 で <code>@/db</code> を <code>TEST_DATABASE_URL</code> 優先にし、E2E の dev サーバも同じ変数で切り替えられるようにしておいたおかげで、
+CI では <strong>その環境変数を service コンテナに向けるだけ</strong>で同じテストが動きます。
+「どこで走っても同じ」を作るのがハーネス設計の目的で、CI はその最初のご褒美です。</p>
+</div>
+
+<h3>4. main を保護する</h3>
+<p>GitHub のリポジトリ設定 &rarr; <strong>Branch protection rules</strong> で <code>main</code> に「Require status checks to pass（<code>quality</code>・<code>test</code>・<code>e2e</code>）」を必須化します。これで<strong>赤い PR は物理的にマージできません</strong>。</p>
+
+<h2>Day 35: 環境（stage）を分ける</h2>
+
+<div class="box learn">
+<p><strong>学びどころ：SST の stage ＝ 環境</strong></p>
+<p>Lesson 7 では <code>--stage dev</code> だけを使いました。SST では stage 名がそのまま<strong>独立した環境</strong>（別 VPC・別 Aurora・別 secret）になります。今回は 3 つに分けます：</p>
+<table>
+<tr><th>stage</th><th>用途</th><th>特徴</th></tr>
+<tr><td>個人名（例 <code>you</code>）</td><td>各自の実験</td><td><code>sst dev</code> や使い捨て。<code>removal: "remove"</code></td></tr>
+<tr><td><code>staging</code></td><td>本番前の共有確認環境</td><td>main マージで自動デプロイ</td></tr>
+<tr><td><code>production</code></td><td>本番</td><td>承認後のみ。<code>removal: "retain"</code> で誤削除を防ぐ</td></tr>
+</table>
+</div>
+
+<h3>5. sst.config.ts を環境差分に対応させる</h3>
+<p>Lesson 7 の <code>app()</code> は既に <code>removal</code> を stage で分けていました。ここに環境ごとの URL 差分などを足します。<code>BETTER_AUTH_URL</code> は環境で変わるので、<code>run()</code> の中で stage を見て組み立てます：</p>
+<pre><code>async run() {
+  const vpc = new sst.aws.Vpc("Vpc", { bastion: true, nat: "ec2" });
+  const database = new sst.aws.Aurora("Database", {
+    engine: "postgres", vpc, scaling: { min: "0 ACU", max: "4 ACU" },
+  });
+  const openaiApiKey = new sst.Secret("OpenaiApiKey");
+
+  const web = new sst.aws.Nextjs("Web", {
+    vpc,
+    link: [database, openaiApiKey],
+    environment: {
+      // URL は初回デプロイ後に確定するので、2 回目で本値に差し替える（Lesson 7 と同じ流儀）
+      BETTER_AUTH_SECRET: new sst.Secret("BetterAuthSecret").value,
+    },
+  });
+
+  return { url: web.url };
+}</code></pre>
+
+<h3>6. secret は stage ごとに登録する</h3>
+<p>Lesson 7 で触れたとおり、secret は stage ごとに別物です。staging・production の分を登録します：</p>
+<pre><code>pnpm dlx sst secret set OpenaiApiKey sk-xxxx --stage staging
+pnpm dlx sst secret set BetterAuthSecret "$(openssl rand -base64 32)" --stage staging
+pnpm dlx sst secret set OpenaiApiKey sk-yyyy --stage production
+pnpm dlx sst secret set BetterAuthSecret "$(openssl rand -base64 32)" --stage production</code></pre>
+
+<h2>Day 36–37: CD — 自動デプロイと承認ゲート</h2>
+
+<h3>7. AWS 認証は OIDC で（長期キーを CI に置かない）</h3>
+<div class="box warn">
+<p><strong>アクセスキーを GitHub Secrets に貼らない</strong></p>
+<p>長期の <code>AWS_ACCESS_KEY_ID</code> を CI に置くのは漏洩時の被害が大きい。GitHub Actions の <strong>OIDC</strong> を使い、
+実行のたびに<strong>短命の一時クレデンシャル</strong>を AWS から受け取る形にします。AWS 側に GitHub を信頼する IAM ロール（<code>gha-deploy</code> など）を 1 つ作り、その ARN だけを CI に渡します。</p>
+</div>
+
+<h3>8. デプロイのワークフロー</h3>
+<p><code>.github/workflows/deploy.yml</code>。main マージで staging に出し、<strong>production は GitHub Environments の承認</strong>を通してから昇格します：</p>
+<pre><code>name: Deploy
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write   # OIDC で一時クレデンシャルを受け取るために必須
+  contents: read
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::&lt;ACCOUNT_ID&gt;:role/gha-deploy
+          aws-region: ap-northeast-1
+      - run: pnpm dlx sst deploy --stage staging
+
+  deploy-production:
+    needs: deploy-staging          # staging が成功しないと動かない
+    runs-on: ubuntu-latest
+    environment: production        # ← この環境に「必須レビュアー」を設定して承認ゲートにする
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::&lt;ACCOUNT_ID&gt;:role/gha-deploy
+          aws-region: ap-northeast-1
+      - run: pnpm dlx sst deploy --stage production</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：承認ゲートは「人が最後に立つ場所」</strong></p>
+<p>GitHub の <strong>Environments</strong> で <code>production</code> に「Required reviewers」を設定すると、<code>deploy-production</code> ジョブは<strong>承認されるまで待機</strong>します。
+自動化はしても、本番反映の最終判断だけは人が押す——この 1 クッションが、真夜中の事故を防ぎます。
+なお、production へ出すのは<strong>テストが緑の main</strong>だけ（CI が門番）で、staging での目視確認を経ている、という多重の防御になっています。</p>
+</div>
+
+<h3>9. マイグレーションの扱い</h3>
+<p>スキーマ変更を含むデプロイでは、Lesson 7 の <code>sst tunnel</code> 経由の <code>drizzle-kit migrate</code> を各環境に対して実行します。
+CI に組み込むこともできますが、DB 破壊のリスクが最も高い操作なので、<strong>本トレーニングでは migrate は手動</strong>のままにし、「アプリのデプロイ」と「スキーマ適用」を切り分けて考える癖をつけます。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>わざとテストを 1 本落とした PR を出す &rarr; CI が赤くなり、マージがブロックされる</li>
+<li>PR を緑にして main にマージ &rarr; staging へ自動デプロイされ、staging の URL でアプリが動く</li>
+<li>production ジョブが「承認待ち」で止まり、承認すると production に反映される</li>
+<li>staging と production で別々の secret（OpenAI キー等）が使われている</li>
+<li>CI に AWS の長期アクセスキーが 1 つも置かれていない（OIDC のみ）</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>service コンテナの Postgres に <strong>health check を付け忘れる</strong>と、DB 起動前に接続して不定期に落ちる。<code>--health-cmd pg_isready</code> は必須。</li>
+<li><code>vitest</code>（ウォッチ）のまま CI に置くとジョブが終わらない。CI は必ず <code>vitest run</code>。</li>
+<li>OIDC ロールの信頼ポリシーで、<code>repo:&lt;org&gt;/&lt;repo&gt;:*</code> の条件を絞らないと他リポジトリから assume される。ブランチや環境で条件を絞る。</li>
+<li>Playwright のブラウザは <code>--with-deps</code> を付けないと Linux の共有ライブラリ不足で起動しない。</li>
+<li>SST は同一 stage への<strong>同時デプロイでロック</strong>する。deploy ワークフローの並行実行は <code>concurrency</code> で 1 本に絞る。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://docs.github.com/actions/using-workflows/workflow-syntax-for-github-actions">GitHub Actions — Workflow syntax</a></li>
+<li><a href="https://docs.github.com/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services">GitHub Actions — OpenID Connect in AWS</a></li>
+<li><a href="https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment">GitHub — Environments（承認ゲート）</a></li>
+<li><a href="https://sst.dev/docs/reference/cli/">SST — CLI（deploy / secret / stage）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-10-e2e-playwright.html">← Lesson 10</a></span>
+<span><a href="lesson-12-error-handling.html">Lesson 12: エラーハンドリングと失敗時の UX →</a></span>
+</div>
+
+</body>
+</html>

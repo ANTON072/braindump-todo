@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13: 本番の可観測性（CloudWatch） — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 13: 本番の可観測性（CloudWatch）</h1>
+<p class="meta">構造化ログ / CloudWatch Logs Insights / メトリクスフィルタ / アラート（SNS メール）｜ 目安 Day 42–45（約 4 時間）</p>
+
+<h2>ゴール</h2>
+<p>本番で「エラーが出た」「遅い」を<strong>能動的に知れる</strong>状態。ログは検索可能な構造化 JSON で相関 ID を持ち、
+エラーが一定数を超えると<strong>メールで通知</strong>され、届いた通知から CloudWatch Logs Insights で原因ログまで辿れる。
+追加の外部サービスは使わず、<strong>AWS（SST）の中だけ</strong>で完結させます。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：可観測性の 3 本柱を「最小で」揃える</strong></p>
+<table>
+<tr><th>柱</th><th>問い</th><th>今回の実装</th></tr>
+<tr><td>Logs</td><td>「何が起きたか」</td><td>構造化 JSON ログ &rarr; CloudWatch Logs（Lambda は stdout が自動収集される）</td></tr>
+<tr><td>Metrics</td><td>「どのくらいの頻度・速さか」</td><td>ログから作るエラー件数メトリクス＋ Lambda / Aurora の標準メトリクス</td></tr>
+<tr><td>Alerts</td><td>「今すぐ見るべきか」</td><td>閾値超過で SNS &rarr; メール通知</td></tr>
+</table>
+<p>「デプロイできた（Lesson 7・11）」の次は<strong>「壊れたら気づける」</strong>。ここが趣味と実務の境目です。
+Lambda + Aurora はログが分散しがちな構成なので、<strong>相関 ID</strong>で 1 リクエストの足跡を追えるようにするのが要になります。</p>
+</div>
+
+<h2>Day 42: 構造化ログを出す</h2>
+
+<h3>1. JSON 1 行で出すロガー</h3>
+<p>Lambda は <code>stdout</code> がそのまま CloudWatch Logs に流れます。<strong>1 行 1 JSON</strong>で出せば、後段の Logs Insights が各フィールドで検索・集計できます。<code>src/lib/logger.ts</code>：</p>
+<pre><code>type Level = "info" | "warn" | "error";
+
+export function log(
+  level: Level,
+  message: string,
+  meta: Record&lt;string, unknown&gt; = {},
+) {
+  const line = JSON.stringify({
+    level,
+    message,
+    time: new Date().toISOString(),
+    ...meta,
+  });
+  (level === "error" ? console.error : console.log)(line);
+}</code></pre>
+
+<h3>2. 相関 ID で 1 リクエストを束ねる</h3>
+<p>Server Action の入口で <code>requestId</code> を 1 つ発行し、その処理内のログすべてに付けます。<code>actions.ts</code> の例：</p>
+<pre><code>import { log } from "@/lib/logger";
+
+export async function createTodo(prevState: unknown, formData: FormData) {
+  const requestId = crypto.randomUUID();
+  const userId = await requireUserId();
+  log("info", "createTodo start", { requestId, userId });
+
+  try {
+    const submission = parseWithZod(formData, { schema: todoSchema });
+    if (submission.status !== "success") return submission.reply();
+    await db.transaction((tx) =&gt; createTodoForUser(tx, userId, submission.value));
+    revalidatePath("/todos");
+    log("info", "createTodo ok", { requestId, userId });
+    return submission.reply({ resetForm: true });
+  } catch (error) {
+    // 詳細はここに集約。ユーザーには Lesson 12 の error.tsx / 文言で返す
+    log("error", "createTodo failed", { requestId, userId, error: String(error) });
+    throw error;
+  }
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：ログに個人情報・秘密を書かない</strong></p>
+<p>ログは長期に残り、広く閲覧されます。<strong>パスワード・API キー・トークン・メール本文・生の個人情報は出さない</strong>。
+今回 <code>userId</code>（不透明な ID）は出しますが、メールアドレスやタグの中身のような内容は原則出しません。
+「相関に必要な最小限（id と種別）」だけを構造化して出す、が基本姿勢です。ログ量はそのままコストにもなります。</p>
+</div>
+
+<h2>Day 43: CloudWatch Logs Insights で追う</h2>
+
+<h3>3. エラーを一覧する</h3>
+<p>デプロイ後、AWS コンソールの <strong>CloudWatch &rarr; Logs Insights</strong> でサーバ関数のロググループを選び、JSON フィールドで検索します：</p>
+<pre><code>fields @timestamp, level, message, requestId, userId
+| filter level = "error"
+| sort @timestamp desc
+| limit 50</code></pre>
+
+<h3>4. 相関 ID で 1 リクエストを再構成する</h3>
+<p>エラー行から <code>requestId</code> を拾い、その ID の足跡だけを時系列で並べれば、「start &rarr; どこで failed したか」が 1 本の物語として読めます：</p>
+<pre><code>fields @timestamp, level, message
+| filter requestId = "ここに拾った UUID"
+| sort @timestamp asc</code></pre>
+<p>Lesson 12 で触れたとおり、本番でユーザーに投げた例外は Next.js が <code>digest</code>（相関 ID）だけ表に出します。
+<strong>ユーザーから「この digest が出た」と言われたら、それをログの相関 ID と突き合わせて原因に辿り着ける</strong>——これが「見える化」の実利です。</p>
+
+<h2>Day 44: メトリクスとアラート</h2>
+
+<h3>5. エラーログ件数をメトリクスにする</h3>
+<p>「エラーが出た」を待つのではなく、<strong>閾値超過で自分に通知</strong>させます。<code>sst.config.ts</code> の <code>run()</code> に、SNS トピック・メール購読・ログのメトリクスフィルタ・アラームを足します（SST v3 では <code>aws</code> プロバイダがグローバルに使えます）：</p>
+<pre><code>// 既存: vpc / database / openaiApiKey ...
+const web = new sst.aws.Nextjs("Web", { vpc, link: [database, openaiApiKey] });
+
+// 通知先（デプロイ後に届く確認メールで購読を承認する）
+const alerts = new aws.sns.Topic("Alerts");
+new aws.sns.TopicSubscription("AlertsEmail", {
+  topic: alerts.arn,
+  protocol: "email",
+  endpoint: "you@example.com",
+});
+
+// サーバ関数のロググループに「level=error の JSON 行」を数えるフィルタを張る
+const logGroupName = web.nodes.server.nodes.logGroup.name;
+new aws.cloudwatch.LogMetricFilter("ErrorLogFilter", {
+  logGroupName,
+  pattern: '{ $.level = "error" }',
+  metricTransformation: {
+    name: "AppErrorCount",
+    namespace: "BraindumpTodo",
+    value: "1",
+    defaultValue: "0",
+  },
+});
+
+// 5 分で 5 件を超えたらメール
+new aws.cloudwatch.MetricAlarm("ErrorRateAlarm", {
+  namespace: "BraindumpTodo",
+  metricName: "AppErrorCount",
+  statistic: "Sum",
+  period: 300,
+  evaluationPeriods: 1,
+  threshold: 5,
+  comparisonOperator: "GreaterThanThreshold",
+  treatMissingData: "notBreaching",
+  alarmActions: [alerts.arn],
+});</code></pre>
+
+<h3>6. 標準メトリクスにもアラームを張る</h3>
+<p>アプリのログだけでなく、AWS が自動で出すメトリクスも監視対象です。最低限、次の 2 つを押さえます：</p>
+<ul>
+<li><strong>Lambda</strong>（<code>AWS/Lambda</code>）— <code>Errors</code>・<code>Duration</code>・<code>Throttles</code>。関数が例外で落ちた回数・遅さ・スロットリング。</li>
+<li><strong>Aurora</strong>（<code>AWS/RDS</code>）— <code>ServerlessDatabaseCapacity</code>（ACU）・<code>DatabaseConnections</code>。Lesson 7 で観測した auto-pause / 復帰や、接続の枯渇をここで数値で捉える。</li>
+</ul>
+<p>同じ <code>aws.cloudwatch.MetricAlarm</code> の型で <code>namespace</code>・<code>metricName</code> を差し替えて足します。</p>
+
+<h2>Day 45: 運用をつなぐ（ランブックとダッシュボード）</h2>
+
+<h3>7. ランブックを 1 枚書く</h3>
+<p>アラートは「来てから考える」と遅い。<strong>来たら何を見るか</strong>を短く決めておきます。<code>docs/runbook.md</code>（例）：</p>
+<pre><code># アラート: ErrorRateAlarm（5分で5件超）
+1. Logs Insights で level=error を直近 30 分で一覧（Day 43 のクエリ）
+2. 最頻出の message と requestId を 1 つ選ぶ
+3. requestId で足跡を時系列に並べ、失敗箇所を特定
+4. 一時要因（Aurora コールドスタート等）なら Duration / ACU も確認
+5. 修正 → PR → CI 緑 → staging 確認 → production 昇格（Lesson 11）</code></pre>
+
+<h3>8. ダッシュボードでひと目にする（任意）</h3>
+<p>CloudWatch Dashboard に「エラー件数・Lambda Duration・Aurora ACU」を並べておくと、
+アラートが鳴る前の<strong>傾向</strong>（じわじわ遅くなっている等）に気づけます。まずはコンソールで手作りで十分です。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：この 3 レッスンが 1 本の輪になる</strong></p>
+<p>Lesson 12（壊れ方を優雅にする）でユーザー向けの安全な文言と<code>digest</code>を出し、
+Lesson 13（見える化）で開発者向けの詳細ログとアラートを用意し、
+Lesson 11（CI/CD）で修正を安全に本番へ戻す。<strong>「壊れる → 気づく → 直す → 安全に出す」</strong>がひと回りして初めて、
+運用できるアプリになります。作れるだけでは半分です。</p>
+</div>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>本番のログが JSON 1 行で出ており、Logs Insights で <code>level</code>・<code>requestId</code> で絞り込める</li>
+<li>わざとエラーを 5 分で 6 回起こす &rarr; <strong>アラートメールが届く</strong></li>
+<li>届いた通知から Logs Insights &rarr; 相関 ID で原因ログまで 3 分以内に辿り着ける</li>
+<li>ログにパスワード・API キー・メール本文などの機微情報が出ていない</li>
+<li>Lambda Errors / Aurora ACU のアラームが張られている</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>SNS メール購読は<strong>確認メールのリンクを踏むまで有効化されない</strong>。「アラームは発火するのにメールが来ない」はまずこれ。</li>
+<li>SST でサーバ関数のロググループ名を参照するノードのパス（本文の <code>web.nodes.server.nodes.logGroup.name</code>）は SST のバージョンで変わりうる。動かないときは <code>sst</code> のドキュメントや <code>web.nodes</code> の内容を確認して合わせる。</li>
+<li>メトリクスフィルタの <code>pattern</code> は JSON 用の記法（<code>{ $.level = "error" }</code>）。ログが JSON でないとマッチしない＝ Day 42 の構造化が前提。</li>
+<li>ログの出しすぎはコスト。ループ内で 1 件ずつ出す等は避け、相関に要る粒度に絞る。</li>
+<li>ローカル（<code>pnpm dev</code>）では CloudWatch は無いので、ログはターミナルに出るだけ。可観測性の確認は staging / production で行う。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/AnalyzingLogData.html">CloudWatch — Logs Insights クエリ</a></li>
+<li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/MonitoringPolicyExamples.html">CloudWatch — メトリクスフィルタ</a></li>
+<li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/AlarmThatSendsEmail.html">CloudWatch — アラーム＋SNS メール</a></li>
+<li><a href="https://sst.dev/docs/component/aws/nextjs/">SST — Nextjs コンポーネント（nodes 参照）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-12-error-handling.html">← Lesson 12</a></span>
+<span><a href="lesson-14-performance.html">Lesson 14: パフォーマンス →</a></span>
+</div>
+
+</body>
+</html>

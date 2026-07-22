@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14: パフォーマンス（ページネーション・インデックス・キャッシュ） — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 14: パフォーマンス</h1>
+<p class="meta">カーソルページネーション / インデックス設計 / Next.js のキャッシュモデル ｜ 目安 Day 46–49（約 4 時間）</p>
+
+<h2>ゴール</h2>
+<p>todo が数千件あっても一覧が速い。クエリが<strong>インデックスに乗り</strong>、一覧は<strong>ページネーション</strong>で必要な分だけ取る。
+そして Next.js のキャッシュがどこで効き／効かないかを理解し、<strong>認証ページを誤ってキャッシュして他人のデータを出す事故</strong>を避けられる状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：速さは「測ってから」。3 大地雷を知る</strong></p>
+<ul>
+<li><strong>無制限取得</strong> — Lesson 5・6 の <code>db.query.todos.findMany({ where: eq(todos.userId, userId) })</code> は<strong>件数の上限が無い</strong>。10 件なら快適でも、5000 件になった瞬間に一覧が固まる、典型的な「時限爆弾」です。</li>
+<li><strong>フルスキャン</strong> — インデックスが無いと、DB は毎回テーブル全走査＋ソートをする。</li>
+<li><strong>N+1</strong> — 一覧の各行ごとに追加クエリ。今回はリレーショナルクエリ（<code>with</code>）で回避済みですが、油断すると復活します。</li>
+</ul>
+<p>このレッスンは、今埋め込まれている<strong>1 つ目の地雷（無制限取得）を実際に処理</strong>し、2 つ目（インデックス）を <code>EXPLAIN</code> で可視化します。
+「推測するな、計測せよ」を手を動かして体感します。</p>
+</div>
+
+<h2>Day 46: カーソルページネーション</h2>
+
+<h3>1. 一覧取得をサービス関数にして、上限とカーソルを入れる</h3>
+<p>一覧ロジックを <code>src/features/todos/service.ts</code> の <code>listTodosForUser</code> に集約します。
+<strong>キーセット（カーソル）方式</strong>——「前ページの最後の行より後ろを N 件」——で取ります。同時刻の行がありうるので、<code>createdAt</code> と <code>id</code> の 2 段で並べ、カーソルも 2 段で比較します：</p>
+<pre><code>import { and, desc, eq, lt, or } from "drizzle-orm";
+import { todos } from "@/db/schema";
+
+const PAGE_SIZE = 20;
+
+type Cursor = { createdAt: Date; id: string };
+
+export async function listTodosForUser(
+  database: Database,
+  userId: string,
+  cursor?: Cursor,
+) {
+  const rows = await database.query.todos.findMany({
+    where: and(
+      eq(todos.userId, userId),
+      // カーソルより「後ろ」だけ。createdAt が同値なら id で決める
+      cursor
+        ? or(
+            lt(todos.createdAt, cursor.createdAt),
+            and(eq(todos.createdAt, cursor.createdAt), lt(todos.id, cursor.id)),
+          )
+        : undefined, // 初回はカーソル無し（and は undefined を無視する）
+    ),
+    orderBy: [desc(todos.createdAt), desc(todos.id)],
+    limit: PAGE_SIZE + 1, // 「次があるか」を知るため 1 件多く取る
+    with: { todosToTags: { with: { tag: true } } },
+  });
+
+  const hasMore = rows.length &gt; PAGE_SIZE;
+  const items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+  const last = items.at(-1);
+  const nextCursor = hasMore &amp;&amp; last
+    ? { createdAt: last.createdAt, id: last.id }
+    : null;
+
+  return { items, nextCursor };
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：なぜ OFFSET ではなくカーソルか</strong></p>
+<p><code>LIMIT 20 OFFSET 4000</code> は、DB が<strong>4000 件を読み飛ばしてから</strong>20 件返すため、後ろのページほど遅くなります。
+さらに、読んでいる間に新しい行が入るとページがズレて<strong>重複・抜け</strong>が起きます。
+カーソル方式は「最後に見た位置より後ろ」を <code>WHERE</code> で直接指すので、<strong>何ページ目でも速度が一定</strong>で、挿入があってもズレません。
+無限スクロールや「もっと見る」と相性がよいのはこのためです。</p>
+</div>
+
+<h3>2. ページと UI をつなぐ</h3>
+<p><code>app/todos/page.tsx</code> は <code>searchParams</code> からカーソルを受け取り、<code>listTodosForUser</code> を呼ぶだけにします。
+「もっと見る」は <code>nextCursor</code> を <code>?cursor=</code> に載せたリンク、または <code>useActionState</code> で追記読み込みにします（実装はどちらでも可）。
+カーソルは <code>createdAt</code> と <code>id</code> の 2 値なので、<code>encodeURIComponent(JSON.stringify(cursor))</code> のように 1 パラメータにまとめると扱いやすいです。</p>
+
+<h2>Day 47: インデックス設計</h2>
+
+<h3>3. 一覧クエリに効くインデックスを張る</h3>
+<p>一覧は「<code>userId</code> で等価 &rarr; <code>createdAt, id</code> で降順ソート」です。この形に一致する複合インデックスを <code>schema.ts</code> に足します：</p>
+<pre><code>import { index } from "drizzle-orm/pg-core";
+
+export const todos = pgTable(
+  "todos",
+  {
+    // ...（既存のカラム定義はそのまま）
+  },
+  (t) =&gt; [
+    index("todos_user_created_idx").on(t.userId, t.createdAt.desc(), t.id.desc()),
+  ],
+);</code></pre>
+<pre><code>pnpm exec drizzle-kit generate
+pnpm exec drizzle-kit migrate</code></pre>
+
+<h3>4. EXPLAIN で「効いた」ことを目で確認する</h3>
+<p>インデックスの前後で実行計画を比べます（Drizzle Studio か psql で）：</p>
+<pre><code>EXPLAIN ANALYZE
+SELECT * FROM todos
+WHERE user_id = '（自分の userId）'
+ORDER BY created_at DESC, id DESC
+LIMIT 21;</code></pre>
+<p>インデックス前は <code>Seq Scan</code>＋<code>Sort</code>、張った後は <code>Index Scan</code> になり、<code>Sort</code> が消えるはずです（並び順がインデックスと一致するため）。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：複合インデックスの列順は「等価 &rarr; ソート」</strong></p>
+<p>複合インデックスは<strong>左から順に</strong>使われます。今回は <code>userId</code>（等価で絞る）を先頭に、続いて並べ替えに使う <code>createdAt DESC, id DESC</code> を置く。
+この順序だと「<code>userId</code> で範囲を特定 &rarr; その中は既に並んでいる」ので、DB は追加のソートをせず先頭 21 件を返せます。
+Lesson 2 の <code>tags(userId, name)</code> ユニークインデックスは<strong>制約（重複を防ぐ）</strong>が目的でしたが、こちらは<strong>性能</strong>が目的——同じ「インデックス」でも狙いが違うことを区別してください。</p>
+</div>
+
+<h2>Day 48: Next.js のキャッシュモデル</h2>
+
+<div class="box learn">
+<p><strong>学びどころ：4 つのキャッシュと、認証アプリでの効き方</strong></p>
+<table>
+<tr><th>キャッシュ</th><th>層</th><th>今回のアプリでは</th></tr>
+<tr><td>Request Memoization</td><td>1 リクエスト内</td><td>同じ関数の重複呼び出しをまとめる。常に有効</td></tr>
+<tr><td>Data Cache</td><td>サーバ・永続</td><td><code>fetch</code> 単位。今回は DB 直アクセスなので基本使わない</td></tr>
+<tr><td>Full Route Cache</td><td>サーバ・ビルド/再検証時</td><td><strong>効かない</strong>。認証で <code>headers()/cookies()</code> を読むため動的レンダリングになる</td></tr>
+<tr><td>Router Cache</td><td>クライアント</td><td>遷移時の一時キャッシュ。<code>revalidatePath</code> で無効化される</td></tr>
+</table>
+<p>本アプリの <code>/todos</code> は <code>requireUserId()</code> がリクエストの Cookie を読むため、Next.js が自動で<strong>動的レンダリング</strong>と判断し、
+ページ全体はキャッシュされません。だから毎回「その人の」データが出ます。
+Lesson 5 以降で使ってきた <code>revalidatePath("/todos")</code> の正体は、<strong>クライアントの Router Cache（と該当パスのデータ）を無効化して、次の表示で最新を取り直させる</strong>指示だったわけです。</p>
+</div>
+
+<h3>5. 認証ページを「静的化しない」ことを保証する</h3>
+<div class="box warn">
+<p><strong>誤キャッシュ＝他人のデータ流出になりうる</strong></p>
+<p>認証付きページを何かの拍子に静的化・キャッシュしてしまうと、<strong>ある人向けに作った HTML が別の人に配られる</strong>——認可（Lesson 5）を丁寧に作っても、キャッシュ 1 つで台無しです。
+今回は Cookie を読むので自動で動的になりますが、明示のガードとして <code>/todos</code> のページに次を置いておくと事故を防げます：</p>
+<pre><code>// app/todos/page.tsx
+export const dynamic = "force-dynamic";</code></pre>
+</div>
+<p>逆に、ログイン不要の完全公開ページ（ランディング等）があれば、そこは静的化・キャッシュの恩恵を積極的に受けてよい。
+<strong>「ユーザー固有か・公開か」でキャッシュ方針を分ける</strong>のが判断軸です。<code>unstable_cache</code> や <code>fetch</code> のキャッシュは、今回のように「ユーザー固有で可変」なデータには使いません。</p>
+
+<h2>Day 49: 計測と仕上げ</h2>
+
+<h3>6. 大量データで体感し、ページネーションをテストで守る</h3>
+<p>Lesson 4 のハーネスに、境界を跨ぐページングの統合テストを足します。<code>createdAt</code> が同時刻に固まっても <code>id</code> で正しく分割できること（重複・欠落なし）を確かめます。<code>src/features/todos/list.test.ts</code>：</p>
+<pre><code>import { beforeEach, describe, expect, it } from "vitest";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+import { seedUser } from "@/test/seed";
+import { listTodosForUser } from "./service";
+
+let userId: string;
+
+beforeEach(async () =&gt; {
+  userId = await seedUser("perf@example.com");
+  // 25 件（PAGE_SIZE=20 を跨ぐ。createdAt は defaultNow で近接する）
+  for (let i = 0; i &lt; 25; i++) {
+    await db.insert(todos).values({ userId, title: `todo ${i}` });
+  }
+});
+
+describe("カーソルページネーション", () =&gt; {
+  it("2 ページで全 25 件を重複・欠落なく取得できる", async () =&gt; {
+    const page1 = await listTodosForUser(db, userId);
+    expect(page1.items).toHaveLength(20);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listTodosForUser(db, userId, page1.nextCursor!);
+    expect(page2.items).toHaveLength(5);
+    expect(page2.nextCursor).toBeNull(); // 最終ページ
+
+    const ids = [...page1.items, ...page2.items].map((t) =&gt; t.id);
+    expect(new Set(ids).size).toBe(25); // 重複なし・全件
+  });
+});</code></pre>
+<p>手元でさらに数千件を seed して <code>EXPLAIN ANALYZE</code> の実測時間を見ると、インデックスとページネーションの効果が数字で分かります。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>一覧が <code>PAGE_SIZE</code> 件で頭打ちになり、「もっと見る」で続きが取れる</li>
+<li><code>EXPLAIN ANALYZE</code> がインデックス後に <code>Index Scan</code> になり、<code>Sort</code> が消える</li>
+<li>ページネーションの境界テストが緑（重複・欠落なし）</li>
+<li><code>/todos</code> が動的レンダリングで、別ユーザーのデータがキャッシュから出ないことを確認</li>
+<li>数千件 seed しても一覧の初期表示が速いままである</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>カーソルの並び（<code>createdAt, id</code>）と <code>orderBy</code>、そしてインデックスの列順が<strong>三者一致していないと</strong>、ソートが消えず速くならない。</li>
+<li><code>createdAt</code> 単独をカーソルにすると、同時刻の行が飛ぶ／重複する。必ず一意な <code>id</code> をタイブレークに含める。</li>
+<li>複合インデックスの列順を間違える（ソート列を先頭に置く等）と、等価の絞り込みに使われず効かない。</li>
+<li>認証ページに <code>export const revalidate</code> や <code>fetch(..., { cache: "force-cache" })</code> をうっかり足すと静的化し、他人のデータが出る危険。ユーザー固有ページはキャッシュしない。</li>
+<li><code>revalidatePath</code> を忘れると、更新後に画面が変わらない（Lesson 5 既出）。これはキャッシュ無効化の問題だったと、ここで腑に落ちるはず。</li>
+</ul>
+</div>
+
+<h2>おわりに — フルスタックの輪が閉じた</h2>
+<p>Lesson 1〜10 で「設計・実装・テスト・デプロイ」を、Lesson 11〜14 で<strong>「自動で出す・優雅に壊れる・見える化する・速くする」</strong>を積みました。
+作れるだけでなく、<strong>出して・気づいて・直して・支える</strong>までひと通り手を動かした——これがフルスタックエンジニアの土台です。
+あとは実プロジェクトで、この輪を何周も回して精度を上げていってください。おつかれさまでした。</p>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://orm.drizzle.team/docs/indexes-constraints">Drizzle — Indexes &amp; Constraints</a></li>
+<li><a href="https://www.postgresql.org/docs/current/using-explain.html">PostgreSQL — EXPLAIN の読み方</a></li>
+<li><a href="https://nextjs.org/docs/app/deep-dive/caching">Next.js — Caching（4 つのキャッシュ）</a></li>
+<li><a href="https://nextjs.org/docs/app/api-reference/functions/revalidatePath">Next.js — revalidatePath</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-13-observability.html">← Lesson 13</a></span>
+<span><a href="index.html">目次に戻る</a></span>
+</div>
+
+</body>
+</html>

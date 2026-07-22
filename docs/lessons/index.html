@@ -32,7 +32,7 @@ th { background:var(--code-bg); }
 <body>
 
 <h1>braindump-todo ハンズオントレーニング</h1>
-<p class="meta">対象：requirements.md に定義された 9 ツールのスタック習得＋テスト（Vitest / Playwright）／ 時間予算：約 1 時間 × 32 日 ＝ 実働 約 32 時間（全 10 レッスン）</p>
+<p class="meta">対象：requirements.md に定義された 9 ツールのスタック習得＋テスト（Vitest / Playwright）＋運用（CI/CD・可観測性・性能）／ 時間予算：約 1 時間 × 49 日 ＝ 実働 約 49 時間（全 14 レッスン）</p>
 
 <p>このトレーニングは「Todo アプリ＋ブレインダンプ抽出＋タグ（多対多）」を題材に、
 Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / Better Auth / OpenAI API / OpenNext + SST
@@ -51,6 +51,10 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <tr><td><a href="lesson-08-openai-extraction.html">Lesson 8</a></td><td>ブレインダンプ抽出</td><td>OpenAI Structured Outputs / Zod 再検証</td><td>Day 25–26（約2h）</td></tr>
 <tr><td><a href="lesson-09-conform-field-array.html">Lesson 9</a></td><td>抽出結果の編集フォームと保存</td><td>Conform field array</td><td>Day 27–28（約2h）</td></tr>
 <tr><td><a href="lesson-10-e2e-playwright.html">Lesson 10</a></td><td>E2E テスト（代表フロー 1 本）</td><td>Playwright</td><td>Day 29–32（約4h）</td></tr>
+<tr><td><a href="lesson-11-cicd-environments.html">Lesson 11</a></td><td>CI/CD と環境昇格（dev→staging→production）</td><td>GitHub Actions / SST stage / OIDC</td><td>Day 33–37（約5h）</td></tr>
+<tr><td><a href="lesson-12-error-handling.html">Lesson 12</a></td><td>エラーハンドリングと失敗時の UX</td><td>App Router（error/loading/not-found）/ 再試行</td><td>Day 38–41（約4h）</td></tr>
+<tr><td><a href="lesson-13-observability.html">Lesson 13</a></td><td>本番の可観測性</td><td>CloudWatch（構造化ログ / Logs Insights / アラート）</td><td>Day 42–45（約4h）</td></tr>
+<tr><td><a href="lesson-14-performance.html">Lesson 14</a></td><td>パフォーマンス</td><td>カーソルページネーション / インデックス / Next.js キャッシュ</td><td>Day 46–49（約4h）</td></tr>
 </table>
 
 <div class="box warn">
@@ -58,7 +62,8 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <strong>必達コアが完成した Lesson 6 の直後にデプロイ（Lesson 7）</strong>を挟んでいます。
 万一 Lesson 8 以降で時間切れになっても「認証つき・タグつき Todo アプリが AWS で動いている」状態が確保されます。
 初回デプロイと Better Auth × Drizzle 接続は既知の山場なので、それぞれ 3 時間を確保しています。
-また<strong>テスト基盤（Lesson 4）をコア実装（Lesson 5・6）の手前に置き</strong>、認可・upsert を書いた直後に同じレッスン内で統合テストを書けるようにしています。E2E（Lesson 10）は全機能が揃ってから代表フロー 1 本だけを最後に足します。</p>
+また<strong>テスト基盤（Lesson 4）をコア実装（Lesson 5・6）の手前に置き</strong>、認可・upsert を書いた直後に同じレッスン内で統合テストを書けるようにしています。E2E（Lesson 10）は全機能が揃ってから代表フロー 1 本だけを最後に足します。
+最後の <strong>Lesson 11〜14 で運用</strong>（CI/CD・失敗時の UX・可観測性・性能）を積み、「作れる」から<strong>「出して・気づいて・直して・支えられる」</strong>へ広げます。ここまでで初めてフルスタックの輪が閉じます。</p>
 </div>
 
 <h2>テスト戦略（ダイヤモンド型）</h2>
@@ -118,6 +123,7 @@ Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / 
 <li>AWS アカウントと認証情報（<code>aws configure</code> 済み。Lesson 7 で使用）</li>
 <li>OpenAI API キー（Lesson 8 で使用。数十円程度の課金が発生）</li>
 <li>Playwright のブラウザ（Lesson 10 で <code>pnpm create playwright</code> 時に導入。事前準備は不要）</li>
+<li>GitHub リポジトリ（Lesson 11 の CI/CD で使用。Actions と Environments を有効化できること）</li>
 </ul>
 
 <h2>設計上のデフォルト（変更したければここだけ差し替える）</h2>

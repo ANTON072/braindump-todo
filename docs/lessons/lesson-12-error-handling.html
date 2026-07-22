@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12: エラーハンドリングと失敗時の UX — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 12: エラーハンドリングと失敗時の UX</h1>
+<p class="meta">App Router の error.tsx / loading.tsx / not-found.tsx / Server Action のエラー設計 / 外部依存の再試行 ｜ 目安 Day 38–41（約 4 時間）</p>
+
+<h2>ゴール</h2>
+<p>例外が起きても<strong>ユーザーに白画面やスタックトレースを見せず</strong>、意味のある画面（読み込み中・エラー・見つからない）が出る。
+Server Action の失敗は握って UI に反映され、Aurora のコールドスタートや OpenAI の一時失敗は<strong>再試行で吸収</strong>される状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：失敗を 3 つに分類し、「投げる」か「値で返す」かを決める</strong></p>
+<table>
+<tr><th>種類</th><th>例</th><th>扱い</th></tr>
+<tr><td>予期した業務エラー</td><td>バリデーション NG、権限なしで他人の todo を操作</td><td><strong>値で返す</strong>（例外にしない）。UI が分岐して表示する</td></tr>
+<tr><td>見つからない</td><td>存在しない todo の詳細ページ</td><td><code>notFound()</code> を呼ぶ &rarr; <code>not-found.tsx</code></td></tr>
+<tr><td>予期せぬ例外</td><td>DB 接続断、想定外の null</td><td><strong>投げる</strong> &rarr; <code>error.tsx</code> が受け止める</td></tr>
+</table>
+<p>この切り分けが全ての土台です。「なんでも <code>throw new Error</code>」でも「なんでも握りつぶす」でもなく、
+<strong>ユーザーが次に何をすればいいか</strong>で扱いを決めます。Lesson 5 で <code>deleteTodoForUser</code> が例外ではなく <code>{ deleted: false }</code> を返す設計にしたのは、まさに「予期した業務エラーは値で返す」だったわけです。</p>
+</div>
+
+<h2>Day 38: ルートセグメントの UX 部品を置く</h2>
+
+<h3>1. loading.tsx — 読み込み中の骨組み</h3>
+<p>Lesson 5 の <code>app/todos/page.tsx</code> は <code>async</code> Server Component で、DB クエリの間ユーザーを待たせます。同階層に <code>loading.tsx</code> を置くだけで、その待ち時間に <strong>Suspense フォールバック</strong>が自動で表示されます。<code>app/todos/loading.tsx</code>：</p>
+<pre><code>export default function Loading() {
+  return (
+    &lt;main className="mx-auto max-w-2xl space-y-2 p-8"&gt;
+      &lt;div className="h-10 animate-pulse rounded bg-gray-100" /&gt;
+      &lt;div className="h-8 animate-pulse rounded bg-gray-100" /&gt;
+      &lt;div className="h-8 animate-pulse rounded bg-gray-100" /&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+
+<h3>2. error.tsx — 想定外の例外を受け止める</h3>
+<p><code>error.tsx</code> は<strong>必ず Client Component</strong>で、<code>error</code> と <code>reset</code>（再試行）を受け取ります。<code>app/todos/error.tsx</code>：</p>
+<pre><code>"use client";
+
+import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error &amp; { digest?: string };
+  reset: () =&gt; void;
+}) {
+  useEffect(() =&gt; {
+    // 詳細はここでログ/監視へ送る（本番の中身は Lesson 13 で実装）
+    console.error(error);
+  }, [error]);
+
+  return (
+    &lt;main className="mx-auto max-w-2xl space-y-4 p-8"&gt;
+      &lt;h2 className="text-lg font-bold"&gt;問題が発生しました&lt;/h2&gt;
+      &lt;p className="text-sm text-gray-600"&gt;
+        一時的な不具合の可能性があります。時間をおいて再度お試しください。
+      &lt;/p&gt;
+      &lt;Button onClick={() =&gt; reset()}&gt;再試行&lt;/Button&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+
+<h3>3. not-found.tsx と global-error.tsx</h3>
+<p>「見つからない」専用の画面と、ルートレイアウト自体が壊れた最後の砦を置きます。<code>app/not-found.tsx</code>：</p>
+<pre><code>import Link from "next/link";
+
+export default function NotFound() {
+  return (
+    &lt;main className="mx-auto max-w-2xl space-y-3 p-8"&gt;
+      &lt;h2 className="text-lg font-bold"&gt;ページが見つかりません&lt;/h2&gt;
+      &lt;Link href="/todos" className="text-blue-600 underline"&gt;Todos に戻る&lt;/Link&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+<p><code>app/global-error.tsx</code> はルートレイアウトの描画すら失敗した場合に出るため、<strong>自前で <code>&lt;html&gt;</code>・<code>&lt;body&gt;</code> を含めます</strong>（通常のレイアウトが使えないので）。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：これらは「置くだけ」で App Router が配線する</strong></p>
+<p><code>loading</code> / <code>error</code> / <code>not-found</code> はファイル名が規約で、そのセグメント配下を自動でラップします。
+<code>error.tsx</code> は React の Error Boundary を、<code>loading.tsx</code> は Suspense 境界を Next.js が裏で張ってくれる仕組みです。
+だから<strong>個別の try/catch を各所に撒く前に、まず境界ファイルを置く</strong>のが App Router の作法になります。</p>
+</div>
+
+<h2>Day 39: Server Action の失敗を UI に返す</h2>
+
+<h3>4. 完了切替・削除の結果を受け取る</h3>
+<p>Lesson 5 の <code>toggleTodoStatus</code> / <code>deleteTodo</code> は、サービス関数の戻り値（<code>{ updated }</code> / <code>{ deleted }</code>）を捨てて <code>revalidatePath</code> するだけでした。
+ここを <strong><code>useActionState</code> で結果を受け取れる形</strong>にして、失敗をユーザーに見せます。<code>actions.ts</code>：</p>
+<pre><code>type ActionResult = { ok: true } | { ok: false; message: string };
+
+export async function deleteTodo(
+  prevState: unknown,
+  todoId: string,
+): Promise&lt;ActionResult&gt; {
+  const userId = await requireUserId();
+  const { deleted } = await deleteTodoForUser(db, userId, todoId);
+  if (!deleted) {
+    // 予期した業務エラー（他人の todo・既に消えている）は値で返す
+    return { ok: false, message: "削除できませんでした" };
+  }
+  revalidatePath("/todos");
+  return { ok: true };
+}</code></pre>
+<p><code>TodoItem</code>（Client Component）側は <code>useActionState</code> で受けて、失敗時だけメッセージを出します：</p>
+<pre><code>"use client";
+import { useActionState } from "react";
+import { deleteTodo } from "./actions";
+
+export function DeleteButton({ todoId }: { todoId: string }) {
+  const [state, action] = useActionState(deleteTodo, { ok: true } as const);
+  return (
+    &lt;form action={action.bind(null, todoId)}&gt;
+      &lt;button type="submit" className="text-sm text-gray-500"&gt;削除&lt;/button&gt;
+      {!state.ok &amp;&amp; &lt;p className="text-xs text-red-600"&gt;{state.message}&lt;/p&gt;}
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+<h3>5. 「見つからない」は notFound() で表す</h3>
+<p>todo 詳細ページのように「その id が無ければ 404」の場面では、例外ではなく <code>notFound()</code> を使います：</p>
+<pre><code>import { notFound } from "next/navigation";
+
+const todo = await db.query.todos.findFirst({
+  where: and(eq(todos.id, id), eq(todos.userId, userId)),
+});
+if (!todo) notFound();   // &rarr; not-found.tsx が描画される</code></pre>
+<p>ここでも <code>eq(todos.userId, userId)</code> を効かせるのが肝心です。<strong>他人の todo は「権限なし」ではなく「存在しない（404）」として扱う</strong>——資源の存在自体を漏らさない、認可の定石です。</p>
+
+<div class="box warn">
+<p><strong>redirect() / notFound() を try/catch で握らない</strong></p>
+<p>Next.js の <code>redirect()</code>・<code>notFound()</code> は<strong>内部的に特殊な例外を投げて</strong>制御を移します。
+これらの呼び出しを <code>try/catch</code> で囲むと、リダイレクトや 404 が「握りつぶされたエラー」になって動かなくなります。
+Server Action で <code>try { ... redirect() } catch</code> と書きがちなので注意——<code>redirect()</code> は必ず try の<strong>外</strong>に置く。</p>
+</div>
+
+<h2>Day 40: 外部依存の失敗に備える（コールドスタート・OpenAI）</h2>
+
+<h3>6. Aurora のコールドスタートを再試行で吸収する</h3>
+<p>Lesson 7 で「auto-pause 明けの最初のリクエストは十数秒待たされる」と観測しました。ここでは<strong>握って再試行</strong>します。<code>src/db/with-retry.ts</code>：</p>
+<pre><code>// 一時的な接続エラー/タイムアウトだけを対象に、短い待機を挟んで数回だけ再試行する
+export async function withRetry&lt;T&gt;(
+  operation: () =&gt; Promise&lt;T&gt;,
+  { retries = 2, delayMs = 1500 } = {},
+): Promise&lt;T&gt; {
+  let lastError: unknown;
+  for (let attempt = 0; attempt &lt;= retries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransient(error) || attempt === retries) throw error;
+      await new Promise((resolve) =&gt; setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+function isTransient(error: unknown): boolean {
+  const code = (error as { code?: string })?.code;
+  // 接続まわりの一時エラーのみ（論理エラーは即失敗させる）
+  return code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "57P01";
+}</code></pre>
+<p>一覧取得のような読み取りを <code>withRetry(() =&gt; db.query.todos.findMany(...))</code> で包みます。
+<strong>再試行してよいのは冪等な操作（主に読み取り）だけ</strong>。副作用のある書き込みを無条件で再試行すると二重登録を招くので、書き込みはトランザクションと業務キーで守る前提にします。</p>
+
+<h3>7. OpenAI 呼び出しにタイムアウトと再試行を付ける</h3>
+<p>Lesson 8 の <code>extractTasksFromBraindump</code> は失敗すると素の例外でした。<strong>タイムアウト</strong>と<strong>1 回の再試行</strong>を足し、ユーザー向けには落ち着いた文言にします：</p>
+<pre><code>const client = new OpenAI({ apiKey: resolveOpenaiApiKey(), timeout: 20_000, maxRetries: 1 });
+
+// runBraindumpExtraction 側（Server Action）
+try {
+  return { ok: true, tasks: await extractTasksFromBraindump(rawText) };
+} catch (error) {
+  console.error("braindump extraction failed", error); // 詳細はログへ（Lesson 13）
+  return { ok: false, message: "抽出に失敗しました。少し時間をおいて再度お試しください。" };
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：本番の文言に内部情報を出さない</strong></p>
+<p>ユーザーに見せるのは「何をすればいいか」だけ（再試行・時間をおく）。<strong>スタックトレースや DB エラー文はユーザーに出さず、ログ／監視へ回す</strong>のが鉄則です。
+Next.js も本番では Server Action / Server Component で投げた例外のメッセージを伏せ、<code>digest</code>（相関 ID）だけを表に出します。
+「ユーザー向けの安全な文言」と「開発者向けの詳細」を分けて出す——その詳細の出し先を作るのが次の Lesson 13 です。</p>
+</div>
+
+<h2>Day 41: 通しで壊して確かめる</h2>
+<p>実際に壊して、各境界が期待どおり出るかを確認します。壊し方の例：</p>
+<ul>
+<li>存在しない id で todo 詳細にアクセス &rarr; <code>not-found.tsx</code> が出る</li>
+<li><code>deleteTodoForUser</code> に他人の id を渡す（DevTools で改ざん）&rarr; フォーム直下に「削除できませんでした」</li>
+<li>Docker の DB を一時停止して一覧を開く &rarr; <code>withRetry</code> の待機の後、復帰するか <code>error.tsx</code> に落ちる</li>
+<li>OpenAI キーをわざと不正にして抽出 &rarr; 落ち着いた文言が出て、アプリは壊れない</li>
+</ul>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>読み込み中に <code>loading.tsx</code> の骨組みが一瞬見える</li>
+<li>想定外の例外で白画面ではなく <code>error.tsx</code>（再試行ボタン付き）が出る</li>
+<li>存在しない／他人の資源は 404 として扱われ、存在の有無が漏れない</li>
+<li>Server Action の失敗がフォームに反映され、成功時はリセット/更新される</li>
+<li>DB コールドスタートや OpenAI 一時失敗が、再試行または丁寧な文言で吸収される</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li><code>error.tsx</code> に <code>"use client"</code> を付け忘れると動かない。Error Boundary はクライアント側の仕組み。</li>
+<li><code>error.tsx</code> は<strong>同階層の <code>layout.tsx</code> の中で</strong>描画されるため、レイアウト自体の例外は捕まえられない。それを捕まえるのが <code>global-error.tsx</code>（<code>&lt;html&gt;</code>/<code>&lt;body&gt;</code> 必須）。</li>
+<li>書き込み操作を安易に <code>withRetry</code> で包むと二重実行の恐れ。再試行は読み取り中心に。</li>
+<li>予期した業務エラーまで <code>throw</code> すると、毎回 <code>error.tsx</code> に飛んでしまい UX が荒くなる。「値で返す／投げる」の分類（冒頭の表）に立ち返る。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://nextjs.org/docs/app/building-your-application/routing/error-handling">Next.js — Error Handling（error.tsx / global-error）</a></li>
+<li><a href="https://nextjs.org/docs/app/api-reference/file-conventions/loading">Next.js — loading.tsx</a></li>
+<li><a href="https://nextjs.org/docs/app/api-reference/functions/not-found">Next.js — notFound()</a></li>
+<li><a href="https://github.com/openai/openai-node#retries">openai-node — timeout / retries</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-11-cicd-environments.html">← Lesson 11</a></span>
+<span><a href="lesson-13-observability.html">Lesson 13: 本番の可観測性 →</a></span>
+</div>
+
+</body>
+</html>
