@@ -58,8 +58,8 @@ volumes:
 <pre><code>docker compose up -d</code></pre>
 
 <h3>2. Drizzle のインストールと設定</h3>
-<pre><code>npm install drizzle-orm pg
-npm install -D drizzle-kit @types/pg</code></pre>
+<pre><code>pnpm add drizzle-orm pg
+pnpm add -D drizzle-kit @types/pg</code></pre>
 <p><code>.env</code>（gitignore 済みであることを確認）：</p>
 <pre><code>DATABASE_URL=postgres://postgres:postgres@localhost:5432/braindump_todo</code></pre>
 <p>リポジトリ直下に <code>drizzle.config.ts</code>：</p>
@@ -165,12 +165,12 @@ export const todosToTagsRelations = relations(todosToTags, ({ one }) =&gt; ({
 </div>
 
 <h3>6. マイグレーションの生成と適用</h3>
-<pre><code>npx drizzle-kit generate   # drizzle/ に SQL ファイルが生成される
-npx drizzle-kit migrate    # DB に適用</code></pre>
+<pre><code>pnpm exec drizzle-kit generate   # drizzle/ に SQL ファイルが生成される
+pnpm exec drizzle-kit migrate    # DB に適用</code></pre>
 <p>生成された SQL を<strong>必ず開いて読む</strong>こと。<code>CONSTRAINT ... PRIMARY KEY("todo_id","tag_id")</code> のように、TypeScript の定義がどんな DDL に変換されたかを確認するのが一番の教材です。</p>
 
 <h3>7. Drizzle Studio で確認</h3>
-<pre><code>npx drizzle-kit studio</code></pre>
+<pre><code>pnpm exec drizzle-kit studio</code></pre>
 <p>ブラウザでテーブル一覧が見えます。手で 1〜2 行入れてみて、複合ユニーク制約に反する行（同じ userId＋name のタグ）が弾かれることも試してみてください。</p>
 
 <div class="box check">
@@ -186,7 +186,7 @@ npx drizzle-kit migrate    # DB に適用</code></pre>
 <p><strong>つまずきポイント</strong></p>
 <ul>
 <li><code>drizzle-kit generate</code> と <code>push</code> の違い：<code>push</code> はマイグレーションファイルを作らず直接 DB を書き換える。試行錯誤には楽だが、<strong>本番（Aurora）にも同じ変更を再現する必要がある</strong>ため、今回は generate → migrate の王道フローで統一する。</li>
-<li><code>drizzle.config.ts</code> が <code>.env</code> を読まない場合は <code>npm install -D dotenv</code> して config 先頭で <code>import "dotenv/config"</code>。</li>
+<li><code>drizzle.config.ts</code> が <code>.env</code> を読まない場合は <code>pnpm add -D dotenv</code> して config 先頭で <code>import "dotenv/config"</code>。</li>
 </ul>
 </div>
 

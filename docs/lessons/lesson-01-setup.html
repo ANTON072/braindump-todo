@@ -31,13 +31,13 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <p class="meta">Next.js (App Router) / TypeScript / Tailwind / shadcn/ui ｜ 目安 Day 1–2（約 2 時間）</p>
 
 <h2>ゴール</h2>
-<p><code>npm run dev</code> で開発サーバーが立ち上がり、shadcn/ui の Button と Card が表示されるトップページがある状態。</p>
+<p><code>pnpm dev</code> で開発サーバーが立ち上がり、shadcn/ui の Button と Card が表示されるトップページがある状態。</p>
 
 <h2>Day 1: Next.js の雛形を作る</h2>
 
 <h3>1. create-next-app</h3>
 <p>リポジトリ直下（<code>braindump-todo/</code>）で実行します。既存ディレクトリに展開するため <code>.</code> を指定します。</p>
-<pre><code>npx create-next-app@latest . --typescript --tailwind --app --src-dir --import-alias "@/*"</code></pre>
+<pre><code>pnpm dlx create-next-app@latest . --typescript --tailwind --app --src-dir --import-alias "@/*"</code></pre>
 <p>質問には基本 Yes で答えて構いません（ESLint: Yes、Turbopack: Yes）。</p>
 
 <div class="box learn">
@@ -50,24 +50,24 @@ pre code { background:none; padding:0; font-size:.8rem; }
 </div>
 
 <h3>2. 動作確認</h3>
-<pre><code>npm run dev</code></pre>
+<pre><code>pnpm dev</code></pre>
 <p><code>http://localhost:3000</code> でデフォルトページが表示されれば OK。</p>
 
 <h2>Day 2: shadcn/ui を導入する</h2>
 
 <h3>3. 初期化</h3>
-<pre><code>npx shadcn@latest init</code></pre>
+<pre><code>pnpm dlx shadcn@latest init</code></pre>
 <p>スタイルやベースカラーは好みで（迷ったらデフォルト）。<code>components.json</code> が生成されます。</p>
 
 <div class="box learn">
 <p><strong>学びどころ：shadcn/ui は「ライブラリ」ではない</strong></p>
 <p>shadcn/ui は npm パッケージとして依存に入るのではなく、<strong>コンポーネントのソースコードを自分のリポジトリにコピーする</strong>方式です。
-<code>npx shadcn add button</code> すると <code>src/components/ui/button.tsx</code> が生成され、以後は自分のコードとして自由に編集できます。
+<code>pnpm dlx shadcn add button</code> すると <code>src/components/ui/button.tsx</code> が生成され、以後は自分のコードとして自由に編集できます。
 「アップデートで壊れない代わりに、アップデートも自分でやる」というトレードオフを選んだツールだと理解しておくと、他プロジェクトでの採用判断にも役立ちます。</p>
 </div>
 
 <h3>4. 今後使うコンポーネントをまとめて追加</h3>
-<pre><code>npx shadcn@latest add button card input label textarea select badge checkbox</code></pre>
+<pre><code>pnpm dlx shadcn@latest add button card input label textarea select badge checkbox</code></pre>
 
 <h3>5. トップページを差し替える</h3>
 <p><code>src/app/page.tsx</code> を最小構成に書き換えて、shadcn のコンポーネントが効いていることを確認します。</p>
@@ -106,10 +106,10 @@ export default function Home() {
 <div class="box check">
 <p><strong>チェックポイント</strong></p>
 <ul>
-<li><code>npm run dev</code> でエラーなく起動する</li>
+<li><code>pnpm dev</code> でエラーなく起動する</li>
 <li>トップページに shadcn の Button（スタイル付き）が表示される</li>
 <li><code>src/components/ui/</code> にコンポーネントのソースが生成されている</li>
-<li><code>npx tsc --noEmit</code> が通る</li>
+<li><code>pnpm exec tsc --noEmit</code> が通る</li>
 </ul>
 </div>
 

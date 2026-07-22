@@ -78,7 +78,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <h2>Day 5: サーバー設定とテーブル生成</h2>
 
 <h3>1. インストールと環境変数</h3>
-<pre><code>npm install better-auth</code></pre>
+<pre><code>pnpm add better-auth</code></pre>
 <p><code>.env</code> に追記：</p>
 <pre><code>BETTER_AUTH_SECRET=（openssl rand -base64 32 で生成した値）
 BETTER_AUTH_URL=http://localhost:3000</code></pre>
@@ -98,13 +98,13 @@ export const auth = betterAuth({
 });</code></pre>
 
 <h3>3. 認証テーブルのスキーマを CLI で生成</h3>
-<pre><code>npx @better-auth/cli@latest generate</code></pre>
+<pre><code>pnpm dlx @better-auth/cli@latest generate</code></pre>
 <p>生成された <code>auth-schema.ts</code> の中身（user / session / account / verification）を <code>src/db/schema.ts</code> に統合します（別ファイルのまま schema.ts から re-export でも可）。統合したら、Lesson 2 で保留していた <strong>FK をここで張ります</strong>：</p>
 <pre><code>// todos.userId と tags.userId を以下に変更
 userId: text("user_id").notNull()
   .references(() =&gt; user.id, { onDelete: "cascade" }),</code></pre>
-<pre><code>npx drizzle-kit generate
-npx drizzle-kit migrate</code></pre>
+<pre><code>pnpm exec drizzle-kit generate
+pnpm exec drizzle-kit migrate</code></pre>
 
 <div class="box learn">
 <p><strong>学びどころ：「認証ライブラリが自前テーブルを持つ」構成</strong></p>
@@ -142,7 +142,7 @@ for (const user of users) {
   if (error) console.error(`Failed: ${user.email}`, error);
   else console.log(`Registered: ${user.email}`);
 }</code></pre>
-<pre><code>npx tsx scripts/seed-users.ts</code></pre>
+<pre><code>pnpm exec tsx scripts/seed-users.ts</code></pre>
 <div class="box warn">
 <p><strong>実行タイミングに注意</strong></p>
 <p>このスクリプトは <code>disableSignup: true</code> を設定する<strong>前</strong>に実行すること。

@@ -103,7 +103,7 @@ pre code { background:none; padding:0; font-size:.8rem; }
 <h2>Day 17: 抽出スキーマと API 呼び出し</h2>
 
 <h3>1. インストールと環境変数</h3>
-<pre><code>npm install openai</code></pre>
+<pre><code>pnpm add openai</code></pre>
 <p><code>.env</code> に追記します（ローカル開発用。デプロイ環境では Lesson 6 で登録した Secret が使われます）：</p>
 <pre><code>OPENAI_API_KEY=sk-（自分のキー）</code></pre>
 
@@ -142,7 +142,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { extractionResultSchema, type ExtractedTask } from "./schema";
 
 function resolveOpenaiApiKey(): string {
-  // ローカル開発（npm run dev）は .env の値を使う
+  // ローカル開発（pnpm dev）は .env の値を使う
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
   // SST 環境では link された Secret から取る（Lesson 6 の db/index.ts と同じ分岐）
   const { Resource } = require("sst") as typeof import("sst");
