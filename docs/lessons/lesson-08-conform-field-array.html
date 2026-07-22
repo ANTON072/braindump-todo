@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8: 抽出結果の編集フォームと保存 — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 8: 抽出結果の編集フォームと保存（Conform field array）</h1>
+<p class="meta">Conform field array / これまでの総集編 ｜ 目安 Day 19–20（約 2 時間）</p>
+
+<h2>ゴール</h2>
+<p>ブレインダンプページで、テキスト貼り付け → 抽出 → 複数行の編集可能フォームで確認・修正 → 一括保存（タグ upsert 込み）が通しで動く状態。<strong>これで完成です。</strong></p>
+
+<h2>Day 19: field array のフォーム</h2>
+
+<h3>1. 保存用スキーマ</h3>
+<p><code>src/features/braindump/schema.ts</code> に追記。抽出スキーマ（API の都合で nullable）とは別に、<strong>フォーム用のスキーマ</strong>を定義します。タグは行ごとのカンマ区切り文字列にして、field array を「やさしい形」に保ちます。</p>
+<pre><code>export const braindumpFormSchema = z.object({
+  tasks: z
+    .array(
+      z.object({
+        title: z.string({ required_error: "タイトルは必須です" }).max(200),
+        dueDate: z.string().date().optional(),
+        priority: z.enum(["low", "med", "high"]).default("med"),
+        tagsInput: z.string().max(500).optional(),
+      }),
+    )
+    .min(1, "タスクが 1 件もありません"),
+});</code></pre>
+
+<h3>2. ページの状態設計</h3>
+<p><code>src/app/braindump/page.tsx</code>（Client Component）は 2 段階の画面です：</p>
+<ol>
+<li><strong>入力段階</strong> — textarea＋「抽出」ボタン。<code>runBraindumpExtraction</code>（Lesson 7）を呼ぶ。</li>
+<li><strong>確認段階</strong> — 抽出結果を <code>defaultValue</code> にした field array フォーム。編集して「すべて保存」。</li>
+</ol>
+<p>抽出結果はフォームの <code>defaultValue</code> に変換してから渡します（null → undefined、tags[] → カンマ区切り）：</p>
+<pre><code>const defaultValue = {
+  tasks: extractedTasks.map((task) =&gt; ({
+    title: task.title,
+    dueDate: task.dueDate ?? undefined,
+    priority: task.priority ?? "med",
+    tagsInput: task.tags.join(", "),
+  })),
+};</code></pre>
+
+<h3>3. field array フォーム本体</h3>
+<p><code>src/features/braindump/braindump-form.tsx</code>：</p>
+<pre><code>"use client";
+
+import { useActionState } from "react";
+import { useForm, getFormProps, getInputProps, getSelectProps } from "@conform-to/react";
+import { parseWithZod } from "@conform-to/zod";
+import { saveBraindumpTasks } from "./actions";
+import { braindumpFormSchema } from "./schema";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function BraindumpForm({ defaultValue }: { defaultValue: unknown }) {
+  const [lastResult, action] = useActionState(saveBraindumpTasks, undefined);
+  const [form, fields] = useForm({
+    lastResult,
+    defaultValue,
+    onValidate({ formData }) {
+      return parseWithZod(formData, { schema: braindumpFormSchema });
+    },
+  });
+
+  const taskFields = fields.tasks.getFieldList();
+
+  return (
+    &lt;form {...getFormProps(form)} action={action} className="space-y-4"&gt;
+      {taskFields.map((taskField, index) =&gt; {
+        const task = taskField.getFieldset();
+        return (
+          &lt;div key={taskField.key} className="flex items-start gap-2 rounded border p-3"&gt;
+            &lt;div className="flex-1 space-y-2"&gt;
+              &lt;Input {...getInputProps(task.title, { type: "text" })} /&gt;
+              &lt;p className="text-sm text-red-600"&gt;{task.title.errors}&lt;/p&gt;
+              &lt;div className="flex gap-2"&gt;
+                &lt;Input {...getInputProps(task.dueDate, { type: "date" })} /&gt;
+                &lt;select {...getSelectProps(task.priority)}
+                        className="rounded border p-2"&gt;
+                  &lt;option value="low"&gt;低&lt;/option&gt;
+                  &lt;option value="med"&gt;中&lt;/option&gt;
+                  &lt;option value="high"&gt;高&lt;/option&gt;
+                &lt;/select&gt;
+              &lt;/div&gt;
+              &lt;Input {...getInputProps(task.tagsInput, { type: "text" })}
+                     placeholder="タグ（カンマ区切り）" /&gt;
+            &lt;/div&gt;
+            &lt;Button variant="ghost" size="sm"
+              {...form.remove.getButtonProps({ name: fields.tasks.name, index })}&gt;
+              削除
+            &lt;/Button&gt;
+          &lt;/div&gt;
+        );
+      })}
+
+      &lt;div className="flex gap-2"&gt;
+        {/* Enter キーの暗黙送信は DOM 上で最初の submit に飛ぶため、保存を先に置く */}
+        &lt;Button type="submit"&gt;すべて保存&lt;/Button&gt;
+        &lt;Button variant="outline" type="submit"
+          {...form.insert.getButtonProps({ name: fields.tasks.name })}&gt;
+          行を追加
+        &lt;/Button&gt;
+      &lt;/div&gt;
+      &lt;p className="text-sm text-red-600"&gt;{fields.tasks.errors}&lt;/p&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：Conform の field array を支える 3 つの仕掛け</strong></p>
+<ul>
+<li><strong><code>getFieldList()</code></strong> — 配列フィールドを行のリストに展開する。各行の <code>getFieldset()</code> でネストしたフィールド（title 等）に降りる。「配列 → 行 → 各項目」の 2 段降下が基本形。</li>
+<li><strong>intent ボタン</strong> — 「行を追加」「削除」は自前の useState ではなく <code>form.insert / form.remove</code> の <code>getButtonProps</code> で作る。実体は特殊な <code>name</code> を持つ submit ボタンで、<strong>フォームの状態変更もフォーム送信の一種として扱う</strong>のが Conform の思想。JS が無効でも動くのはこの設計のおかげ。</li>
+<li><strong><code>key={taskField.key}</code></strong> — <code>index</code> ではなく Conform が振る key を使う。行削除時に React が行を取り違えるバグ（field array の定番事故）を防ぐ。</li>
+</ul>
+</div>
+
+<h2>Day 20: 一括保存と仕上げ</h2>
+
+<h3>4. 保存 Server Action</h3>
+<p><code>src/features/braindump/actions.ts</code> に追記。Lesson 5 のヘルパーがそのまま再利用できます——ここが総集編たるゆえんです。</p>
+<pre><code>import { redirect } from "next/navigation";
+import { parseWithZod } from "@conform-to/zod";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+import { attachTagsToTodo, normalizeTagNames } from "@/features/tags/upsert-tags";
+import { braindumpFormSchema } from "./schema";
+
+export async function saveBraindumpTasks(prevState: unknown, formData: FormData) {
+  const userId = await requireUserId();
+
+  const submission = parseWithZod(formData, { schema: braindumpFormSchema });
+  if (submission.status !== "success") return submission.reply();
+
+  await db.transaction(async (tx) =&gt; {
+    for (const task of submission.value.tasks) {
+      const { tagsInput, ...todoValues } = task;
+      const [todo] = await tx.insert(todos)
+        .values({ ...todoValues, userId })
+        .returning();
+      await attachTagsToTodo(tx, userId, todo.id, normalizeTagNames(tagsInput ?? ""));
+    }
+  });
+
+  redirect("/todos");
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：全件で 1 トランザクション</strong></p>
+<p>5 件抽出して 3 件目で失敗したとき、「2 件だけ保存された」状態はユーザーには失敗にしか見えません。
+<strong>ブレインダンプ 1 回の保存は all-or-nothing</strong> にするのが正解で、ループ全体を 1 つの <code>db.transaction</code> で包みます。
+Lesson 5 で <code>attachTagsToTodo</code> が <code>tx</code> を受け取る設計にしておいたことが、ここでそのまま効いています。</p>
+</div>
+
+<h3>5. 通しで動作確認 → デプロイ</h3>
+<p>ローカルで通ったら、OpenAI の Secret を本物にして再デプロイします：</p>
+<pre><code>npx sst secret set OpenaiApiKey sk-（本物のキー） --stage dev
+npx sst deploy --stage dev</code></pre>
+
+<div class="box check">
+<p><strong>チェックポイント（＝完成条件）</strong></p>
+<ul>
+<li>「歯医者に電話、牛乳買う、金曜までにレポート、Sam にメール」を貼る → 4 行の編集フォームが出る</li>
+<li>1 行削除・1 行追加・タグを書き換えてから保存 → /todos に全件がタグ付きで並ぶ</li>
+<li>同じタグ名は再利用されている（tags テーブルが重複していない）</li>
+<li>タイトルを空にした行があると保存できず、その行にエラーが出る</li>
+<li>以上すべてが CloudFront URL（本番）でも動く</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>「行を追加」を押したらフォーム全体が送信されてしまう場合、<code>getButtonProps</code> のスプレッドが <code>type="submit"</code> より<strong>後</strong>に来ているか確認（intent ボタンは特殊な name/value を持つ submit として動く必要がある）。</li>
+<li>テキスト入力中に Enter を押すと、HTML の暗黙送信の仕様により <strong>DOM 上で最初の submit ボタン</strong>が押された扱いになる。「行を追加」を保存より先に置くと Enter のたびに行が増えるため、本文のコードでは「すべて保存」を先にしている。</li>
+<li>行を削除したら別の行の入力値が消えた／ずれた場合は <code>key</code> に <code>index</code> を使っている。<code>taskField.key</code> に直す。</li>
+<li>ネストしたフィールドの <code>name</code> は <code>tasks[0].title</code> 形式。<code>parseWithZod</code> はこれを自動で配列に復元する。自前で name を組み立てないこと。</li>
+</ul>
+</div>
+
+<h2>完走後のふりかえり（推奨）</h2>
+<p>30 分だけ取って、次を自分の言葉でメモに書き出すと定着が段違いです：</p>
+<ul>
+<li>9 ツールそれぞれの「一言でいうと何をするやつか」</li>
+<li>いちばん時間を食った箇所と、その根本原因</li>
+<li>次のプロジェクトでも使い回せるコード（<code>requireUserId</code>、<code>attachTagsToTodo</code>、二重検証の型…）</li>
+</ul>
+<p>余力があれば優先度 4（タグ絞り込み UI）へ。<code>inArray</code> と <code>exists</code> サブクエリの練習になります。おつかれさまでした！</p>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://conform.guide/complex-structures">Conform — Nested objects / Arrays</a></li>
+<li><a href="https://conform.guide/intent-button">Conform — Intent button（insert / remove）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-07-openai-extraction.html">← Lesson 7</a></span>
+<span><a href="index.html">目次に戻る</a></span>
+</div>
+
+</body>
+</html>

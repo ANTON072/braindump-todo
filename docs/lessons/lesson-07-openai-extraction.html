@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7: ブレインダンプ抽出 — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 7: ブレインダンプ抽出（OpenAI Structured Outputs）</h1>
+<p class="meta">OpenAI API / Zod 再検証 ｜ 目安 Day 17–18（約 2 時間）</p>
+
+<h2>ゴール</h2>
+<p>雑多なテキストを Server Action に渡すと、Zod 検証済みのタスク配列（<code>{title, dueDate?, priority?, tags[]}[]</code>）が返ってくる状態。UI は次のレッスンで作るので、ここでは抽出関数の完成が目標。</p>
+
+<div class="box">
+<p>パイプライン全体像（requirements.md より）：<br>
+貼り付けたテキスト → <strong>OpenAI（Structured Outputs）→ Zod で再検証</strong> → Conform field array にプリフィル → ユーザーが確認・修正 → 保存。<br>
+このレッスンは太字部分を作ります。</p>
+</div>
+
+<h2>Day 17: 抽出スキーマと API 呼び出し</h2>
+
+<h3>1. インストールと環境変数</h3>
+<pre><code>npm install openai</code></pre>
+<p><code>.env</code> に追記します（ローカル開発用。デプロイ環境では Lesson 6 で登録した Secret が使われます）：</p>
+<pre><code>OPENAI_API_KEY=sk-（自分のキー）</code></pre>
+
+<h3>2. 抽出スキーマを Zod で定義する</h3>
+<p><code>src/features/braindump/schema.ts</code>：</p>
+<pre><code>import { z } from "zod";
+
+export const extractedTaskSchema = z.object({
+  title: z.string().min(1),
+  // Structured Outputs は optional を許さないため nullable で表現する（下の学びどころ参照）
+  dueDate: z.string().nullable(),
+  priority: z.enum(["low", "med", "high"]).nullable(),
+  tags: z.array(z.string()),
+});
+
+export const extractionResultSchema = z.object({
+  tasks: z.array(extractedTaskSchema),
+});
+
+export type ExtractedTask = z.infer&lt;typeof extractedTaskSchema&gt;;</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：Structured Outputs のスキーマ制約</strong></p>
+<p>OpenAI の Structured Outputs は JSON Schema の strict モードで動くため、独特の制約があります：</p>
+<ul>
+<li><strong>全フィールド必須</strong> — <code>.optional()</code> は使えない。「値がないかもしれない」は <code>.nullable()</code>（null を返させる）で表現する。</li>
+<li><strong>ルートはオブジェクト</strong> — 配列を直接返せないので <code>{ tasks: [...] }</code> と 1 枚ラップする。</li>
+</ul>
+<p>この「API の都合が混ざったスキーマ」と「アプリ内部のきれいな型」を混同しないことが、構造化出力を使う設計の勘所です。</p>
+</div>
+
+<h3>3. 抽出関数</h3>
+<p><code>src/features/braindump/extract-tasks.ts</code>：</p>
+<pre><code>import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
+import { extractionResultSchema, type ExtractedTask } from "./schema";
+
+function resolveOpenaiApiKey(): string {
+  // ローカル開発（npm run dev）は .env の値を使う
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  // SST 環境では link された Secret から取る（Lesson 6 の db/index.ts と同じ分岐）
+  const { Resource } = require("sst") as typeof import("sst");
+  return Resource.OpenaiApiKey.value;
+}
+
+const client = new OpenAI({ apiKey: resolveOpenaiApiKey() });
+
+const SYSTEM_PROMPT = `あなたはタスク抽出アシスタントです。
+ユーザーが雑に書き出したテキストから、実行可能なタスクを抽出してください。
+- title は簡潔な命令形にする
+- 期日が読み取れる場合のみ dueDate に YYYY-MM-DD で入れる（今日は {today}）
+- 緊急度が読み取れる場合のみ priority を設定する
+- 内容を分類する日本語タグを 0〜3 個付ける（例: 買い物, 仕事, 家庭）
+- タスクでないもの（感想・メモ）は含めない`;
+
+export async function extractTasksFromBraindump(
+  rawText: string,
+): Promise&lt;ExtractedTask[]&gt; {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const response = await client.responses.parse({
+    model: "gpt-4o-mini",
+    input: [
+      { role: "system", content: SYSTEM_PROMPT.replace("{today}", today) },
+      { role: "user", content: rawText },
+    ],
+    text: { format: zodTextFormat(extractionResultSchema, "extraction") },
+  });
+
+  // SDK がパース済みでも、境界防御として自前の Zod で再検証する
+  const verified = extractionResultSchema.safeParse(response.output_parsed);
+  if (!verified.success) {
+    throw new Error("抽出結果がスキーマに一致しませんでした");
+  }
+  return verified.data.tasks;
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：なぜ「再検証」するのか</strong></p>
+<p>Structured Outputs はスキーマ準拠を強く保証しますが、それでも <strong>LLM の出力は外部入力として扱う</strong>のが原則です。
+SDK のパース結果を <code>safeParse</code> にもう一度通すことで、(1) SDK やモデルの挙動変更から下流コードを守る、
+(2) 「この関数から出てくる値は必ずこの型」という保証を<strong>自分のコードベースの責任範囲</strong>で完結させる、の 2 つが得られます。
+requirements.md が Zod を「OpenAI の構造化出力を再検証する層」と位置づけているのはこのためです。</p>
+</div>
+
+<h2>Day 18: Server Action 化と実験</h2>
+
+<h3>4. Server Action にする</h3>
+<p><code>src/features/braindump/actions.ts</code>：</p>
+<pre><code>"use server";
+
+import { requireUserId } from "@/lib/session";
+import { extractTasksFromBraindump } from "./extract-tasks";
+
+export async function runBraindumpExtraction(rawText: string) {
+  await requireUserId();  // API コストを守るため、認証必須にする
+  if (rawText.trim().length === 0 || rawText.length &gt; 4000) {
+    throw new Error("テキストは 1〜4000 文字で入力してください");
+  }
+  return extractTasksFromBraindump(rawText);
+}</code></pre>
+
+<h3>5. プロンプトで遊ぶ（ここが一番おもしろい）</h3>
+<p>UI がまだないので、仮ページかテストスクリプトから呼び出して実験します。試すと学びが多い入力：</p>
+<ul>
+<li>基本形：「歯医者に電話、牛乳買う、金曜までにレポート、Sam にメール」</li>
+<li>相対日付：「明日ゴミ出し、来週月曜に請求書」→ dueDate が正しく解決されるか（system prompt に today を渡した効果）</li>
+<li>タスクでないもの混じり：「今日は疲れた。あと牛乳買う」→ 感想が除外されるか</li>
+<li>空っぽの入力：「あああ」→ tasks が空配列で返るか</li>
+</ul>
+<p>期待とずれたら SYSTEM_PROMPT を調整します。<strong>スキーマ（構造の保証）とプロンプト（内容の質）は別のレイヤー</strong>で、前者は Zod が、後者はプロンプト調整が担当——という分担が体感できるはずです。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>例文がタスク配列に構造化され、型が <code>ExtractedTask[]</code> で通る</li>
+<li>「金曜までに」等の相対日付が正しい YYYY-MM-DD になる</li>
+<li>未ログイン状態から Server Action を叩くとリダイレクト（コスト防御の確認）</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>Zod スキーマに <code>.optional()</code> や <code>.default()</code> が混ざっていると API がスキーマ変換エラーを返す。エラーメッセージに <code>required</code> と出たらこれ。</li>
+<li>API キーは<strong>絶対にクライアントに置かない</strong>。呼び出しは必ず Server Action / サーバーコード内で。<code>NEXT_PUBLIC_</code> プレフィックスを付けたら事故。</li>
+<li>SDK のメソッド名（<code>responses.parse</code> / <code>zodTextFormat</code>）は SDK のバージョンで変わりやすい。動かない場合は openai-node の README の Structured Outputs 節と突き合わせる。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://platform.openai.com/docs/guides/structured-outputs">OpenAI — Structured Outputs ガイド</a></li>
+<li><a href="https://github.com/openai/openai-node">openai-node — README（zod helper の使用例）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-06-sst-deploy.html">← Lesson 6</a></span>
+<span><a href="lesson-08-conform-field-array.html">Lesson 8: 編集フォームと保存 →</a></span>
+</div>
+
+</body>
+</html>

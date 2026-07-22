@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1: プロジェクトセットアップ — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 1: プロジェクトセットアップ</h1>
+<p class="meta">Next.js (App Router) / TypeScript / Tailwind / shadcn/ui ｜ 目安 Day 1–2（約 2 時間）</p>
+
+<h2>ゴール</h2>
+<p><code>npm run dev</code> で開発サーバーが立ち上がり、shadcn/ui の Button と Card が表示されるトップページがある状態。</p>
+
+<h2>Day 1: Next.js の雛形を作る</h2>
+
+<h3>1. create-next-app</h3>
+<p>リポジトリ直下（<code>braindump-todo/</code>）で実行します。既存ディレクトリに展開するため <code>.</code> を指定します。</p>
+<pre><code>npx create-next-app@latest . --typescript --tailwind --app --src-dir --import-alias "@/*"</code></pre>
+<p>質問には基本 Yes で答えて構いません（ESLint: Yes、Turbopack: Yes）。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：App Router の頭の切り替え</strong></p>
+<ul>
+<li><code>src/app/</code> 配下のフォルダ構造がそのまま URL になる。<code>src/app/todos/page.tsx</code> → <code>/todos</code>。</li>
+<li><strong>コンポーネントはデフォルトで Server Component</strong>。サーバーで実行されるので、その中で直接 DB を読める（後のレッスンで多用する）。</li>
+<li><code>useState</code> やイベントハンドラが必要なときだけ、ファイル先頭に <code>"use client"</code> を書いて Client Component にする。「まず Server、必要なときだけ Client」が王道。</li>
+</ul>
+</div>
+
+<h3>2. 動作確認</h3>
+<pre><code>npm run dev</code></pre>
+<p><code>http://localhost:3000</code> でデフォルトページが表示されれば OK。</p>
+
+<h2>Day 2: shadcn/ui を導入する</h2>
+
+<h3>3. 初期化</h3>
+<pre><code>npx shadcn@latest init</code></pre>
+<p>スタイルやベースカラーは好みで（迷ったらデフォルト）。<code>components.json</code> が生成されます。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：shadcn/ui は「ライブラリ」ではない</strong></p>
+<p>shadcn/ui は npm パッケージとして依存に入るのではなく、<strong>コンポーネントのソースコードを自分のリポジトリにコピーする</strong>方式です。
+<code>npx shadcn add button</code> すると <code>src/components/ui/button.tsx</code> が生成され、以後は自分のコードとして自由に編集できます。
+「アップデートで壊れない代わりに、アップデートも自分でやる」というトレードオフを選んだツールだと理解しておくと、他プロジェクトでの採用判断にも役立ちます。</p>
+</div>
+
+<h3>4. 今後使うコンポーネントをまとめて追加</h3>
+<pre><code>npx shadcn@latest add button card input label textarea select badge checkbox</code></pre>
+
+<h3>5. トップページを差し替える</h3>
+<p><code>src/app/page.tsx</code> を最小構成に書き換えて、shadcn のコンポーネントが効いていることを確認します。</p>
+<pre><code>import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export default function Home() {
+  return (
+    &lt;main className="mx-auto max-w-2xl p-8"&gt;
+      &lt;Card&gt;
+        &lt;CardHeader&gt;
+          &lt;CardTitle&gt;braindump-todo&lt;/CardTitle&gt;
+        &lt;/CardHeader&gt;
+        &lt;CardContent className="flex gap-2"&gt;
+          &lt;Button&gt;ログイン&lt;/Button&gt;
+          &lt;Button variant="outline"&gt;新規登録&lt;/Button&gt;
+        &lt;/CardContent&gt;
+      &lt;/Card&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：Tailwind の使い方はこの 3 パターンで 8 割</strong></p>
+<ul>
+<li>レイアウト：<code>flex gap-2</code>、<code>grid grid-cols-2</code>、<code>mx-auto max-w-2xl</code></li>
+<li>余白：<code>p-8</code>（padding）、<code>mt-4</code>（margin-top）、数字は 0.25rem 刻み</li>
+<li>状態：<code>hover:bg-gray-100</code>、<code>disabled:opacity-50</code></li>
+</ul>
+<p>今回のプロジェクトでは凝ったデザインはしない方針なので、細かいユーティリティは shadcn コンポーネントに任せ、自分で書くのはレイアウトと余白程度に留めます。</p>
+</div>
+
+<h3>6. コミット</h3>
+<p>ここで一度コミットしておきます（以後、各レッスン末尾でコミットする習慣にします）。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li><code>npm run dev</code> でエラーなく起動する</li>
+<li>トップページに shadcn の Button（スタイル付き）が表示される</li>
+<li><code>src/components/ui/</code> にコンポーネントのソースが生成されている</li>
+<li><code>npx tsc --noEmit</code> が通る</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li><code>create-next-app</code> は空でないディレクトリを嫌がることがある。requirements.md 等がある状態で失敗する場合は、一時的に退避してから実行し、戻す。</li>
+<li>shadcn の <code>init</code> で Tailwind の設定が見つからないと言われたら、Tailwind v4（CSS ファーストの設定）と v3（tailwind.config.ts）の違いが原因のことが多い。shadcn 公式の Next.js ガイドの手順に従うこと。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://nextjs.org/docs/app">Next.js — App Router</a></li>
+<li><a href="https://ui.shadcn.com/docs/installation/next">shadcn/ui — Next.js Installation</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="index.html">← 目次</a></span>
+<span><a href="lesson-02-drizzle-schema.html">Lesson 2: DB スキーマとマイグレーション →</a></span>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5: タグ（多対多）の保存と取得 — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 5: タグ（多対多）の保存と取得 ★最重要</h1>
+<p class="meta">Drizzle（find-or-create / 中間テーブル / リレーショナルクエリ）｜ 目安 Day 11–13（約 3 時間）</p>
+
+<h2>ゴール</h2>
+<p>todo 作成時にカンマ区切りでタグを入力でき、「あれば再利用・なければ作成」で保存され、一覧にタグ付きで表示される状態。</p>
+
+<div class="box">
+<p>requirements.md いわく「実務頻出のパターンで、ここが最重要の学びどころ。時間が押しやすいのもこの保存ロジック」。
+このレッスンだけは、コードを写す前に<strong>まず紙に処理の流れを書いてから</strong>実装することを勧めます。</p>
+</div>
+
+<h2>Day 11: タグ upsert ヘルパー</h2>
+
+<h3>1. 保存ロジックの設計を言葉で押さえる</h3>
+<p>「タグ名の配列を受け取り、todo に紐付ける」処理は 3 ステップに分解できます：</p>
+<ol>
+<li><strong>INSERT ... ON CONFLICT DO NOTHING</strong> — 全タグ名を一括 INSERT。既存の (userId, name) は Lesson 2 で張ったユニーク制約に衝突して静かにスキップされる。</li>
+<li><strong>SELECT で引き直す</strong> — 新規・既存を問わず、対象タグの id を名前でまとめて取得する。</li>
+<li><strong>中間テーブルへ INSERT</strong> — (todoId, tagId) を一括 INSERT。こちらも複合主キーとの衝突は DO NOTHING で流す。</li>
+</ol>
+
+<div class="box learn">
+<p><strong>学びどころ：なぜ「INSERT してから SELECT し直す」のか</strong></p>
+<p><code>onConflictDoNothing().returning()</code> は<strong>実際に挿入された行しか返しません</strong>。既存タグの id は returning では手に入らない。
+だから「新規も既存も区別せず、最後に名前で SELECT し直す」のがこのパターンの定石です。
+1 件ずつ「SELECT → なければ INSERT」をループする素朴な実装と比べ、クエリ数が件数に依存しない（常に 3 回）のも利点。</p>
+</div>
+
+<h3>2. 実装</h3>
+<p><code>src/features/tags/upsert-tags.ts</code>。トランザクションの中から呼べるよう、第 1 引数で <code>tx</code> を受け取る形にします。</p>
+<pre><code>import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { tags, todosToTags } from "@/db/schema";
+
+type Tx = Parameters&lt;Parameters&lt;typeof db.transaction&gt;[0]&gt;[0];
+
+export function normalizeTagNames(raw: string): string[] {
+  const names = raw
+    .split(",")
+    .map((name) =&gt; name.trim().toLowerCase())
+    .filter((name) =&gt; name.length &gt; 0);
+  return [...new Set(names)];
+}
+
+export async function attachTagsToTodo(
+  tx: Tx,
+  userId: string,
+  todoId: string,
+  tagNames: string[],
+) {
+  if (tagNames.length === 0) return;
+
+  // 1. あれば衝突スキップ、なければ作成
+  await tx
+    .insert(tags)
+    .values(tagNames.map((name) =&gt; ({ userId, name })))
+    .onConflictDoNothing();
+
+  // 2. 新規・既存を問わず id を引き直す
+  const tagRows = await tx
+    .select({ id: tags.id })
+    .from(tags)
+    .where(and(eq(tags.userId, userId), inArray(tags.name, tagNames)));
+
+  // 3. 中間テーブルに紐付け
+  await tx
+    .insert(todosToTags)
+    .values(tagRows.map((tag) =&gt; ({ todoId, tagId: tag.id })))
+    .onConflictDoNothing();
+}</code></pre>
+
+<h2>Day 12: 作成フローへの組み込み</h2>
+
+<h3>3. スキーマとフォームに tags を足す</h3>
+<p><code>todoSchema</code> に 1 フィールド追加（カンマ区切り文字列のまま受ける）：</p>
+<pre><code>tagsInput: z.string().max(500).optional(),</code></pre>
+<p>フォームには <code>&lt;Input {...getInputProps(fields.tagsInput, { type: "text" })} placeholder="タグ（カンマ区切り: 買い物, 仕事）" /&gt;</code> を追加。チップ型ピッカーは作りません（優先度 4）。</p>
+
+<h3>4. createTodo をトランザクション化する</h3>
+<pre><code>import { attachTagsToTodo, normalizeTagNames } from "@/features/tags/upsert-tags";
+
+export async function createTodo(prevState: unknown, formData: FormData) {
+  const userId = await requireUserId();
+
+  const submission = parseWithZod(formData, { schema: todoSchema });
+  if (submission.status !== "success") return submission.reply();
+
+  const { tagsInput, ...todoValues } = submission.value;
+  const tagNames = normalizeTagNames(tagsInput ?? "");
+
+  await db.transaction(async (tx) =&gt; {
+    const [todo] = await tx.insert(todos)
+      .values({ ...todoValues, userId })
+      .returning();
+    await attachTagsToTodo(tx, userId, todo.id, tagNames);
+  });
+
+  revalidatePath("/todos");
+  return submission.reply({ resetForm: true });
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：トランザクションの境界の決め方</strong></p>
+<p>「todo は作られたのにタグの紐付けだけ失敗した」という中途半端な状態を許さないため、
+<strong>todo 本体の INSERT とタグ処理を 1 つの <code>db.transaction</code> に入れます</strong>。
+ヘルパーが <code>db</code> ではなく <code>tx</code> を受け取る設計にしたのはこのためで、「トランザクションを開く責任は呼び出し側、
+中で何をするかは部品側」という分担は実務でもよく使う形です。</p>
+</div>
+
+<h2>Day 13: タグ付きで一覧を取得する</h2>
+
+<h3>5. リレーショナルクエリ</h3>
+<p><code>src/app/todos/page.tsx</code> の取得部を差し替え：</p>
+<pre><code>const todoRows = await db.query.todos.findMany({
+  where: eq(todos.userId, userId),
+  orderBy: [desc(todos.createdAt)],
+  with: {
+    todosToTags: {
+      with: { tag: true },
+    },
+  },
+});
+
+// 中間テーブル 2 段ネストを UI 用にフラット化する
+const todosWithTags = todoRows.map((todo) =&gt; ({
+  ...todo,
+  tags: todo.todosToTags.map((link) =&gt; link.tag),
+}));</code></pre>
+<p>表示は shadcn の <code>Badge</code> でタグ名を並べるだけで十分です。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：<code>with</code> の 2 段ネストは Lesson 2 の relations の写し絵</strong></p>
+<p><code>with: { todosToTags: { with: { tag: true } } }</code> という形は、<code>relations()</code> で宣言した
+「todos → todosToTags → tag」の経路をそのままなぞっています。SQL 的には JOIN 相当の処理を
+Drizzle が組み立て、結果を型付きのネスト構造で返してくれる——これがリレーショナルクエリ API の価値です。
+返り値の型にカーソルを乗せて、<code>todosToTags: { tag: { name: string ... } }[]</code> まで推論されていることを確認してください。</p>
+</div>
+
+<h3>6. （任意）編集時のタグ更新</h3>
+<p>余力があれば、todo 編集でタグを差し替える処理も書いてみてください。定石は「<code>tx.delete(todosToTags).where(eq(todosToTags.todoId, todoId))</code> で紐付けを全消し → <code>attachTagsToTodo</code> で再構築」。差分更新より単純で、中間テーブルならではの割り切りです。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>「買い物, 仕事」で todo を 2 件作成 → tags テーブルの行は 2 行のまま増えない（再利用の確認）</li>
+<li>一覧の各 todo にタグの Badge が表示される</li>
+<li>todo を削除 → todos_to_tags の紐付け行が消える（cascade の確認）が、tags 本体は残る</li>
+<li>別ユーザーで同名タグ「買い物」を作れる（ユニーク制約が userId 込みであることの確認）</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li><code>inArray(tags.name, [])</code> のように<strong>空配列を渡すとエラー</strong>になる。ヘルパー冒頭の <code>length === 0</code> ガードを消さないこと。</li>
+<li>タグ名の正規化（trim・小文字化・重複除去）を怠ると「買い物」と「買い物 」が別タグになる。正規化は<strong>保存直前の 1 箇所</strong>（normalizeTagNames）に集約する。</li>
+<li><code>db.query</code> が <code>undefined</code> になる場合は、Lesson 2 の <code>drizzle(pool, { schema })</code> で schema を渡し忘れている。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://orm.drizzle.team/docs/guides/upsert">Drizzle — Upsert（ON CONFLICT）</a></li>
+<li><a href="https://orm.drizzle.team/docs/transactions">Drizzle — Transactions</a></li>
+<li><a href="https://orm.drizzle.team/docs/rqb#include-relations">Drizzle — Relational Queries（with）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-04-todos-crud.html">← Lesson 4</a></span>
+<span><a href="lesson-06-sst-deploy.html">Lesson 6: AWS への初回デプロイ →</a></span>
+</div>
+
+</body>
+</html>

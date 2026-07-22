@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3: 認証（Better Auth） — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 3: 認証（Better Auth × Drizzle）</h1>
+<p class="meta">Better Auth / Drizzle アダプタ ｜ 目安 Day 5–7（約 3 時間）＝ 既知の山場その 1</p>
+
+<h2>ゴール</h2>
+<p>メール＋パスワードでサインアップ／ログイン／ログアウトでき、サーバー側でセッションからユーザー ID が取れる状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：Better Auth の全体像（先にこれを頭に入れる）</strong></p>
+<p>Better Auth の部品は 4 つで、それぞれ役割が違います。</p>
+<ul>
+<li><strong>サーバー設定</strong>（<code>auth.ts</code>）— 認証ロジック本体。DB アダプタと有効化する機能をここで宣言。</li>
+<li><strong>API ルート</strong>（<code>/api/auth/[...all]</code>）— サインイン等のエンドポイントを 1 つのキャッチオールで全部引き受ける。</li>
+<li><strong>クライアント</strong>（<code>auth-client.ts</code>）— ブラウザから API ルートを叩くための薄いラッパー。</li>
+<li><strong>DB テーブル</strong> — user / session / account / verification の 4 テーブルを Better Auth が要求し、CLI がスキーマを生成してくれる。</li>
+</ul>
+</div>
+
+<h2>Day 5: サーバー設定とテーブル生成</h2>
+
+<h3>1. インストールと環境変数</h3>
+<pre><code>npm install better-auth</code></pre>
+<p><code>.env</code> に追記：</p>
+<pre><code>BETTER_AUTH_SECRET=（openssl rand -base64 32 で生成した値）
+BETTER_AUTH_URL=http://localhost:3000</code></pre>
+
+<h3>2. サーバー設定</h3>
+<p><code>src/lib/auth.ts</code>：</p>
+<pre><code>import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "@/db";
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, { provider: "pg" }),
+  emailAndPassword: { enabled: true },
+});</code></pre>
+
+<h3>3. 認証テーブルのスキーマを CLI で生成</h3>
+<pre><code>npx @better-auth/cli@latest generate</code></pre>
+<p>生成された <code>auth-schema.ts</code> の中身（user / session / account / verification）を <code>src/db/schema.ts</code> に統合します（別ファイルのまま schema.ts から re-export でも可）。統合したら、Lesson 2 で保留していた <strong>FK をここで張ります</strong>：</p>
+<pre><code>// todos.userId と tags.userId を以下に変更
+userId: text("user_id").notNull()
+  .references(() =&gt; user.id, { onDelete: "cascade" }),</code></pre>
+<pre><code>npx drizzle-kit generate
+npx drizzle-kit migrate</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：「認証ライブラリが自前テーブルを持つ」構成</strong></p>
+<p>Better Auth はユーザー管理を丸ごと引き受ける代わりに、テーブル定義の主導権も持ちます。
+自分のドメインテーブル（todos, tags）から <code>user.id</code> へ FK を張ることで両者が接続される——この「境界線」を意識するのが今回の学びです。
+Better Auth のテーブルを手で改造しない（プラグインや <code>additionalFields</code> で拡張する）のが原則。</p>
+</div>
+
+<h2>Day 6: API ルートとクライアント</h2>
+
+<h3>4. キャッチオール API ルート</h3>
+<p><code>src/app/api/auth/[...all]/route.ts</code>：</p>
+<pre><code>import { auth } from "@/lib/auth";
+import { toNextJsHandler } from "better-auth/next-js";
+
+export const { GET, POST } = toNextJsHandler(auth);</code></pre>
+
+<h3>5. クライアント</h3>
+<p><code>src/lib/auth-client.ts</code>：</p>
+<pre><code>import { createAuthClient } from "better-auth/react";
+
+export const authClient = createAuthClient();</code></pre>
+
+<h3>6. サインアップ／ログインページ</h3>
+<p><code>src/app/signup/page.tsx</code>（Client Component）。ここは認証フローの学習が目的なので、Conform は使わず素朴に書きます（Conform は Lesson 4 の主役）。</p>
+<pre><code>"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export default function SignupPage() {
+  const router = useRouter();
+  const [errorMessage, setErrorMessage] = useState&lt;string | null&gt;(null);
+
+  async function submitSignup(formData: FormData) {
+    const { error } = await authClient.signUp.email({
+      name: String(formData.get("name")),
+      email: String(formData.get("email")),
+      password: String(formData.get("password")),
+    });
+    if (error) setErrorMessage(error.message ?? "登録に失敗しました");
+    else router.push("/todos");
+  }
+
+  return (
+    &lt;form action={submitSignup} className="mx-auto max-w-sm space-y-4 p-8"&gt;
+      &lt;Input name="name" placeholder="名前" required /&gt;
+      &lt;Input name="email" type="email" placeholder="メールアドレス" required /&gt;
+      &lt;Input name="password" type="password" placeholder="パスワード（8文字以上）" required /&gt;
+      {errorMessage &amp;&amp; &lt;p className="text-sm text-red-600"&gt;{errorMessage}&lt;/p&gt;}
+      &lt;Button type="submit" className="w-full"&gt;登録&lt;/Button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+<p>ログインページ（<code>/login</code>）も同様に <code>authClient.signIn.email</code> で作ります。ログアウトは <code>authClient.signOut()</code>。</p>
+
+<h2>Day 7: サーバー側でのセッション取得と保護</h2>
+
+<h3>7. セッション取得ヘルパー</h3>
+<p>以後すべての Server Action・ページで使う、このプロジェクトで最重要のヘルパーです。<code>src/lib/session.ts</code>：</p>
+<pre><code>import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+
+export async function requireUserId(): Promise&lt;string&gt; {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) redirect("/login");
+  return session.user.id;
+}</code></pre>
+
+<h3>8. 保護されたページの雛形</h3>
+<p><code>src/app/todos/page.tsx</code>（Server Component）：</p>
+<pre><code>import { requireUserId } from "@/lib/session";
+
+export default async function TodosPage() {
+  const userId = await requireUserId();
+  return &lt;main className="p-8"&gt;ログイン中: {userId}&lt;/main&gt;;
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：認可の基本形は「毎回サーバーで訊く」</strong></p>
+<p>クライアントの状態（「ログイン済みに見える」）は信用せず、<strong>ページと Server Action の入口で毎回 <code>requireUserId()</code> を呼ぶ</strong>のが基本形です。
+middleware でのガードは UX 向上のための補助であって、認可の本体はあくまで各エントリポイント側に置きます。</p>
+</div>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>サインアップ → Drizzle Studio の user テーブルに行が増える</li>
+<li>ログイン → <code>/todos</code> に自分の userId が表示される</li>
+<li>ブラウザのシークレットウィンドウで <code>/todos</code> を開く → <code>/login</code> にリダイレクトされる</li>
+<li>ログアウト後に <code>/todos</code> → リダイレクトされる</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント（山場その 1 の核心）</strong></p>
+<ul>
+<li>CLI の <code>generate</code> が DB 接続やスキーマ配置をうまく認識しないことがある。その場合は公式ドキュメントの Drizzle アダプタのページにある<strong>手書きスキーマ例をコピー</strong>して済ませてよい。CLI との格闘に時間を溶かさないこと。</li>
+<li><code>auth.api.getSession</code> に <code>headers()</code> を渡し忘れる／<code>await headers()</code> にしていない、が定番のエラー。Next.js 15 から <code>headers()</code> は async。</li>
+<li>ID の型の不一致：Better Auth 生成テーブルの <code>user.id</code> は text。todos 側の <code>userId</code> も text にしてあるので合うはずだが、FK エラーが出たら型を最初に疑う。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://www.better-auth.com/docs/installation">Better Auth — Installation</a></li>
+<li><a href="https://www.better-auth.com/docs/adapters/drizzle">Better Auth — Drizzle adapter</a></li>
+<li><a href="https://www.better-auth.com/docs/integrations/next">Better Auth — Next.js integration</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-02-drizzle-schema.html">← Lesson 2</a></span>
+<span><a href="lesson-04-todos-crud.html">Lesson 4: Todos の CRUD →</a></span>
+</div>
+
+</body>
+</html>

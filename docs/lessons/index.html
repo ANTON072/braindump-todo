@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>braindump-todo ハンズオントレーニング — 目次</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; }
+th { background:var(--code-bg); }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+</style>
+</head>
+<body>
+
+<h1>braindump-todo ハンズオントレーニング</h1>
+<p class="meta">対象：requirements.md に定義された 9 ツールのスタック習得 ／ 時間予算：約 1 時間 × 20 日 ＝ 実働 20 時間</p>
+
+<p>このトレーニングは「Todo アプリ＋ブレインダンプ抽出＋タグ（多対多）」を題材に、
+Next.js / TypeScript / Tailwind &amp; shadcn/ui / Zod / Drizzle ORM / Conform / Better Auth / OpenAI API / OpenNext + SST
+を<strong>王道・イディオム的な使い方</strong>で一巡することを目的とします。凝った実装よりも、後で読み返して学べるコードを優先します。</p>
+
+<h2>レッスン一覧と時間割</h2>
+<table>
+<tr><th>レッスン</th><th>テーマ</th><th>主に学ぶツール</th><th>目安</th></tr>
+<tr><td><a href="lesson-01-setup.html">Lesson 1</a></td><td>プロジェクトセットアップ</td><td>Next.js / TypeScript / Tailwind / shadcn/ui</td><td>Day 1–2（約2h）</td></tr>
+<tr><td><a href="lesson-02-drizzle-schema.html">Lesson 2</a></td><td>DB スキーマとマイグレーション</td><td>Drizzle ORM / PostgreSQL(Docker)</td><td>Day 3–4（約2h）</td></tr>
+<tr><td><a href="lesson-03-better-auth.html">Lesson 3</a></td><td>認証（メール＋パスワード）</td><td>Better Auth × Drizzle</td><td>Day 5–7（約3h）</td></tr>
+<tr><td><a href="lesson-04-todos-crud.html">Lesson 4</a></td><td>Todos の CRUD と認可</td><td>Conform / Zod / Server Actions</td><td>Day 8–10（約3h）</td></tr>
+<tr><td><a href="lesson-05-tags-many-to-many.html">Lesson 5</a></td><td>タグ（多対多）の保存と取得 ★最重要</td><td>Drizzle（upsert・中間テーブル・リレーショナルクエリ）</td><td>Day 11–13（約3h）</td></tr>
+<tr><td><a href="lesson-06-sst-deploy.html">Lesson 6</a></td><td>AWS への初回デプロイ</td><td>SST / OpenNext / Aurora Serverless v2</td><td>Day 14–16（約3h）</td></tr>
+<tr><td><a href="lesson-07-openai-extraction.html">Lesson 7</a></td><td>ブレインダンプ抽出</td><td>OpenAI Structured Outputs / Zod 再検証</td><td>Day 17–18（約2h）</td></tr>
+<tr><td><a href="lesson-08-conform-field-array.html">Lesson 8</a></td><td>抽出結果の編集フォームと保存</td><td>Conform field array</td><td>Day 19–20（約2h）</td></tr>
+</table>
+
+<div class="box warn">
+<p><strong>順序の意図：</strong>スコープ優先度（①認証＋CRUD → ②タグ多対多 → ③ブレインダンプ → ④UI作り込み）に沿って、
+<strong>必達コアが完成した Lesson 5 の直後にデプロイ（Lesson 6）</strong>を挟んでいます。
+万一 Lesson 7 以降で時間切れになっても「認証つき・タグつき Todo アプリが AWS で動いている」状態が確保されます。
+初回デプロイと Better Auth × Drizzle 接続は既知の山場なので、それぞれ 3 時間を確保しています。</p>
+</div>
+
+<h2>事前準備（Lesson 1 の前に）</h2>
+<ul>
+<li>Node.js 20 以上（LTS 推奨）と pnpm または npm</li>
+<li>Docker Desktop（ローカル開発用 PostgreSQL に使用）</li>
+<li>AWS アカウントと認証情報（<code>aws configure</code> 済み。Lesson 6 で使用）</li>
+<li>OpenAI API キー（Lesson 7 で使用。数十円程度の課金が発生）</li>
+</ul>
+
+<h2>設計上のデフォルト（変更したければここだけ差し替える）</h2>
+<p>requirements.md で「プランニング時に確認」とされていた判断は、学習コストが最小になる以下のデフォルトを採用しています。異論があればレッスン開始前に変更してください。</p>
+<table>
+<tr><th>論点</th><th>デフォルト</th><th>理由</th></tr>
+<tr><td>status の持ち方</td><td><code>open / done</code> の 2 値 enum</td><td>ステートマシンは今回の学習対象外。最小で十分</td></tr>
+<tr><td>ソフトデリート</td><td>なし（物理削除）</td><td>認可チェックの学びに集中する。deletedAt は将来課題</td></tr>
+<tr><td>タグ入力 UI</td><td>カンマ区切りテキスト</td><td>カンマ区切り入力は必達コア②の最小実装として Lesson 5 で作る。チップ型ピッカーや絞り込み UI（優先度4・任意）は採用しない</td></tr>
+<tr><td>dueDate</td><td><code>date</code> 型（時刻なし）</td><td>タイムゾーン問題を回避</td></tr>
+<tr><td>OpenAI モデル</td><td>gpt-4o-mini</td><td>抽出用途には十分・安価</td></tr>
+</table>
+
+<h2>各レッスンの構成</h2>
+<ul>
+<li><strong>ゴール</strong> — そのレッスンが終わったときに動いているもの</li>
+<li><strong>学びどころ</strong>（紫の枠）— そのツールの王道イディオムの解説</li>
+<li><strong>ハンズオン手順</strong> — コマンドとコード</li>
+<li><strong>チェックポイント</strong>（緑の枠）— 次に進んでよいかの確認項目</li>
+<li><strong>つまずきポイント</strong>（赤の枠）— ハマりやすい箇所と回避策</li>
+</ul>
+
+<div class="box">
+<p><strong>ライブラリのバージョンについて：</strong>本テキストのコードは執筆時点の各ライブラリの安定版イディオムに基づいています。
+Conform・Better Auth・SST は API の変化が速いため、コードが動かない場合はまず公式ドキュメントの該当ページ（各レッスン末尾にリンクあり）と突き合わせてください。
+なお Zod は本テキスト全体を v3 構文で統一しており、Lesson 4 で <code>zod@3</code> を明示してインストールします。
+「テキストと現実の差分を自分で埋める」こと自体が実務的な学びです。</p>
+</div>
+
+</body>
+</html>

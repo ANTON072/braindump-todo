@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4: Todos の CRUD と認可 — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+</style>
+</head>
+<body>
+
+<h1>Lesson 4: Todos の CRUD と認可</h1>
+<p class="meta">Conform / Zod / Server Actions / Drizzle ｜ 目安 Day 8–10（約 3 時間）</p>
+
+<h2>ゴール</h2>
+<p>ログインユーザーが自分の todo を作成・一覧・完了切替・削除でき、他人の todo には一切触れない状態。</p>
+
+<div class="box learn">
+<p><strong>学びどころ：Conform の設計思想（先にこれを理解する）</strong></p>
+<p>Conform の核心は「<strong>同じ Zod スキーマで、クライアントとサーバーの両方で検証する</strong>」ことです。</p>
+<ul>
+<li>クライアント側：<code>useForm</code> の <code>onValidate</code> で <code>parseWithZod</code> → 即時のエラー表示（UX）。</li>
+<li>サーバー側：Server Action の先頭で同じスキーマの <code>parseWithZod</code> → 本物の防御（セキュリティ）。</li>
+<li>検証 NG のとき、サーバーは <code>submission.reply()</code> を返し、Conform がそれをフォームのエラー表示に復元する。この <strong>lastResult の往復</strong>が Conform のイディオムの中心。</li>
+</ul>
+</div>
+
+<h2>Day 8: スキーマと作成フォーム</h2>
+
+<h3>1. インストールと Zod スキーマ</h3>
+<pre><code>npm install @conform-to/react @conform-to/zod zod@3</code></pre>
+<p>Zod は v4 でエラー指定が <code>{ error: ... }</code> に変わり、Conform 側も import パスが <code>@conform-to/zod/v4</code> になるなど、本テキストのコード（v3 構文）と互換がありません。そのため <code>zod@3</code> を明示しています。</p>
+<p><code>src/features/todos/schema.ts</code>。クライアント・サーバーの両方から import するので、DB コードとは分離しておきます。</p>
+<pre><code>import { z } from "zod";
+
+export const todoSchema = z.object({
+  title: z.string({ required_error: "タイトルは必須です" }).max(200),
+  notes: z.string().max(2000).optional(),
+  dueDate: z.string().date().optional(),
+  priority: z.enum(["low", "med", "high"]).default("med"),
+});</code></pre>
+
+<h3>2. Server Action（作成）</h3>
+<p><code>src/features/todos/actions.ts</code>：</p>
+<pre><code>"use server";
+
+import { revalidatePath } from "next/cache";
+import { parseWithZod } from "@conform-to/zod";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+import { requireUserId } from "@/lib/session";
+import { todoSchema } from "./schema";
+
+export async function createTodo(prevState: unknown, formData: FormData) {
+  const userId = await requireUserId();
+
+  const submission = parseWithZod(formData, { schema: todoSchema });
+  if (submission.status !== "success") {
+    return submission.reply();
+  }
+
+  await db.insert(todos).values({ ...submission.value, userId });
+  revalidatePath("/todos");
+  return submission.reply({ resetForm: true });
+}</code></pre>
+
+<h3>3. フォームコンポーネント</h3>
+<p><code>src/features/todos/todo-form.tsx</code>（Client Component）：</p>
+<pre><code>"use client";
+
+import { useActionState } from "react";
+import { useForm, getFormProps, getInputProps, getSelectProps } from "@conform-to/react";
+import { parseWithZod } from "@conform-to/zod";
+import { createTodo } from "./actions";
+import { todoSchema } from "./schema";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function TodoForm() {
+  const [lastResult, action] = useActionState(createTodo, undefined);
+  const [form, fields] = useForm({
+    lastResult,
+    defaultValue: { priority: "med" },
+    onValidate({ formData }) {
+      return parseWithZod(formData, { schema: todoSchema });
+    },
+    shouldValidate: "onBlur",
+  });
+
+  return (
+    &lt;form {...getFormProps(form)} action={action} className="space-y-3"&gt;
+      &lt;Input {...getInputProps(fields.title, { type: "text" })} placeholder="やること" /&gt;
+      &lt;p className="text-sm text-red-600"&gt;{fields.title.errors}&lt;/p&gt;
+      &lt;Input {...getInputProps(fields.dueDate, { type: "date" })} /&gt;
+      &lt;select {...getSelectProps(fields.priority)} className="border rounded p-2"&gt;
+        &lt;option value="low"&gt;低&lt;/option&gt;
+        &lt;option value="med"&gt;中&lt;/option&gt;
+        &lt;option value="high"&gt;高&lt;/option&gt;
+      &lt;/select&gt;
+      &lt;Button type="submit"&gt;追加&lt;/Button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：<code>getFormProps</code> / <code>getInputProps</code> は何をしているか</strong></p>
+<p><code>id</code>・<code>name</code>・<code>aria-invalid</code>・<code>defaultValue</code> 等の属性一式を、スキーマと検証状態から機械的に生成しています。
+手書きの <code>name="title"</code> がスキーマとずれる事故（フォーム開発の定番バグ）を型レベルで防ぐのが狙い。
+また <code>getFormProps(form)</code> に含まれる <code>noValidate</code> により、ブラウザ標準の検証を切って Zod に一本化しています。</p>
+</div>
+
+<h2>Day 9: 一覧表示（Read）</h2>
+
+<h3>4. 一覧ページ</h3>
+<p><code>src/app/todos/page.tsx</code>。Server Component から直接 Drizzle を呼びます。</p>
+<pre><code>import { desc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { todos } from "@/db/schema";
+import { requireUserId } from "@/lib/session";
+import { TodoForm } from "@/features/todos/todo-form";
+import { TodoItem } from "@/features/todos/todo-item";
+
+export default async function TodosPage() {
+  const userId = await requireUserId();
+  const todoRows = await db.query.todos.findMany({
+    where: eq(todos.userId, userId),
+    orderBy: [desc(todos.createdAt)],
+  });
+
+  return (
+    &lt;main className="mx-auto max-w-2xl space-y-6 p-8"&gt;
+      &lt;TodoForm /&gt;
+      &lt;ul className="space-y-2"&gt;
+        {todoRows.map((todo) =&gt; (
+          &lt;TodoItem key={todo.id} todo={todo} /&gt;
+        ))}
+      &lt;/ul&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：一覧の認可は「WHERE 句」でやる</strong></p>
+<p>「全部取ってからフィルタ」ではなく、<strong>クエリの WHERE に必ず <code>userId</code> を入れる</strong>。
+取得段階で他人のデータがプロセスに入ってこないようにするのが認可の第一原則です。</p>
+</div>
+
+<h2>Day 10: 更新・削除と所有者チェック</h2>
+
+<h3>5. 完了切替と削除の Server Action</h3>
+<p><code>actions.ts</code> に追記。単純な操作は Conform を通さず、<code>bind</code> で ID を渡す素朴な形で十分です。</p>
+<pre><code>import { and, eq } from "drizzle-orm";
+
+export async function toggleTodoStatus(todoId: string) {
+  const userId = await requireUserId();
+  const todo = await db.query.todos.findFirst({
+    where: and(eq(todos.id, todoId), eq(todos.userId, userId)),
+  });
+  if (!todo) throw new Error("Not found");
+
+  await db.update(todos)
+    .set({ status: todo.status === "open" ? "done" : "open", updatedAt: new Date() })
+    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)));
+  revalidatePath("/todos");
+}
+
+export async function deleteTodo(todoId: string) {
+  const userId = await requireUserId();
+  await db.delete(todos)
+    .where(and(eq(todos.id, todoId), eq(todos.userId, userId)));
+  revalidatePath("/todos");
+}</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：所有者チェックの型 —「id だけで WHERE しない」</strong></p>
+<p>更新・削除の WHERE は常に <code>and(eq(id, ...), eq(userId, ...))</code> の複合条件にします。
+「先に SELECT して所有者を確かめてから UPDATE」でも間違いではありませんが、WHERE に含める形なら
+<strong>チェックと操作が単一のクエリで原子的</strong>になり、書き忘れも起きにくい。今回のアプリ全編を貫く型です。</p>
+</div>
+
+<h3>6. TodoItem コンポーネント</h3>
+<p><code>src/features/todos/todo-item.tsx</code>（Client Component）。<code>toggleTodoStatus.bind(null, todo.id)</code> を <code>form action</code> に渡すだけの素朴な作りで十分です。チェックボックス＋タイトル＋削除ボタンを 1 行に並べます。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>作成 → 一覧に反映され、フォームがリセットされる</li>
+<li>タイトル空で送信 → クライアントで即エラー表示。さらに JS を無効化して送信してもサーバーで弾かれる（二重検証の確認）</li>
+<li>ユーザーを 2 人作り、互いの todo が見えないこと・触れないことを確認</li>
+<li>DevTools から他人の todoId で削除アクションを叩いても失敗する</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント</strong></p>
+<ul>
+<li>Server Action の第 1 引数は <code>prevState</code>。<code>useActionState</code> と組む関数は <code>(prevState, formData)</code> のシグネチャにする。忘れると formData に prevState が入って混乱する。</li>
+<li><code>submission.reply({ resetForm: true })</code> を返さないと、成功後もフォームに入力が残る。</li>
+<li><code>revalidatePath</code> を忘れると DB は更新されるのに画面が変わらない。「保存はされてるのに表示されない」ときはまずこれ。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://conform.guide/tutorial">Conform — Tutorial（Next.js + Zod）</a></li>
+<li><a href="https://conform.guide/api/react/useForm">Conform — useForm API</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-03-better-auth.html">← Lesson 3</a></span>
+<span><a href="lesson-05-tags-many-to-many.html">Lesson 5: タグ（多対多） →</a></span>
+</div>
+
+</body>
+</html>

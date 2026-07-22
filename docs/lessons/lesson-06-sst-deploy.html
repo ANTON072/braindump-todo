@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6: AWS への初回デプロイ — braindump-todo</title>
+<style>
+:root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --accent:#0969da; --border:#d1d9e0; --code-bg:#f6f8fa; }
+* { box-sizing:border-box; }
+body { margin:0 auto; padding:2rem 1.25rem 4rem; max-width:46rem; color:var(--fg); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.8; }
+h1 { font-size:1.6rem; border-bottom:2px solid var(--border); padding-bottom:.4rem; }
+h2 { font-size:1.25rem; margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.05rem; margin-top:1.8rem; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; background:var(--code-bg); padding:.15em .35em; border-radius:4px; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; line-height:1.6; }
+pre code { background:none; padding:0; font-size:.8rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+.box { border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:6px; padding:.8rem 1rem; margin:1.2rem 0; }
+.box.learn { border-left-color:#8250df; background:#fbf7ff; }
+.box.warn { border-left-color:#d1242f; background:#fff5f5; }
+.box.check { border-left-color:#1a7f37; background:#f2fbf5; }
+.box p:first-child { margin-top:0; } .box p:last-child, .box ul:last-child { margin-bottom:0; }
+.nav { display:flex; justify-content:space-between; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.9rem; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th,td { border:1px solid var(--border); padding:.45rem .6rem; text-align:left; }
+th { background:var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Lesson 6: AWS への初回デプロイ</h1>
+<p class="meta">SST / OpenNext / Aurora Serverless v2 ｜ 目安 Day 14–16（約 3 時間）＝ 既知の山場その 2</p>
+
+<h2>ゴール</h2>
+<p>ここまでのアプリ（認証＋CRUD＋タグ）が、CloudFront の URL で Aurora を DB として動いている状態。</p>
+
+<div class="box warn">
+<p><strong>先に知っておくコストの話</strong></p>
+<table>
+<tr><th>リソース</th><th>コスト感</th></tr>
+<tr><td>Lambda + CloudFront + S3</td><td>低トラフィックならほぼ無料枠内</td></tr>
+<tr><td>Aurora（0 ACU〜、auto-pause）</td><td>停止中の計算コスト 0。ストレージ課金は継続（月 $1〜数ドル）</td></tr>
+<tr><td>VPC の NAT</td><td><code>nat: "ec2"</code>（t4g.nano）で月 $3〜4 程度。マネージド NAT Gateway（月 $30〜）は選ばない</td></tr>
+</table>
+<p>遊び終わったら <code>npx sst remove</code> で全リソースを削除できます（これも IaC の学びの一部）。</p>
+</div>
+
+<h2>Day 14: SST の初期化と構成</h2>
+
+<h3>1. 初期化</h3>
+<pre><code>npx sst@latest init</code></pre>
+<p>Next.js プロジェクトを自動検出し、<code>sst.config.ts</code> が生成されます。</p>
+
+<h3>2. sst.config.ts を書く</h3>
+<pre><code>/// &lt;reference path="./.sst/platform/config.d.ts" /&gt;
+
+export default $config({
+  app(input) {
+    return {
+      name: "braindump-todo",
+      removal: input?.stage === "production" ? "retain" : "remove",
+      home: "aws",
+    };
+  },
+  async run() {
+    const vpc = new sst.aws.Vpc("Vpc", { bastion: true, nat: "ec2" });
+
+    const database = new sst.aws.Aurora("Database", {
+      engine: "postgres",
+      vpc,
+      scaling: { min: "0 ACU", max: "4 ACU" },
+    });
+
+    const openaiApiKey = new sst.Secret("OpenaiApiKey");
+
+    new sst.aws.Nextjs("Web", {
+      vpc,
+      link: [database, openaiApiKey],
+    });
+  },
+});</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：SST v3 の 3 つの中心概念</strong></p>
+<ul>
+<li><strong>コンポーネント</strong> — <code>sst.aws.Aurora</code> は「クラスタ＋サブネットグループ＋セキュリティグループ…」を 1 つにまとめた高水準部品。<code>scaling.min: "0 ACU"</code> で auto-pause が有効になる（requirements.md の決定事項どおり）。</li>
+<li><strong>link</strong> — リソース間の配線。<code>link: [database]</code> と書くだけで、接続情報が Lambda に注入され、かつ必要な IAM 権限とネットワーク設定が付与される。環境変数を手でコピペする世界からの脱却。</li>
+<li><strong>Secret</strong> — <code>npx sst secret set OpenaiApiKey sk-... --stage dev</code> で登録し、コードから <code>Resource</code> 経由で読む。<strong>secret はステージごとに登録する</strong>（<code>--stage</code> を省略すると personal ステージに入ってしまい、dev ステージのアプリからは読めない）。<code>.env</code> をデプロイ先に持ち込まない。</li>
+</ul>
+</div>
+
+<h3>3. アプリ側から接続情報を読む</h3>
+<p><code>src/db/index.ts</code> を、link された Aurora とローカル Docker の両対応にします：</p>
+<pre><code>import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import * as schema from "./schema";
+
+function buildConnectionConfig() {
+  // ローカル開発（Docker Postgres）は DATABASE_URL を使う
+  if (process.env.DATABASE_URL) {
+    return { connectionString: process.env.DATABASE_URL };
+  }
+  // SST 環境では link された Aurora から取る
+  const { Resource } = require("sst") as typeof import("sst");
+  return {
+    host: Resource.Database.host,
+    port: Resource.Database.port,
+    user: Resource.Database.username,
+    password: Resource.Database.password,
+    database: Resource.Database.database,
+  };
+}
+
+const pool = new Pool({ ...buildConnectionConfig(), max: 1 });
+
+export const db = drizzle(pool, { schema });</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：Lambda では接続プールを小さく</strong></p>
+<p><code>max: 1</code> は Lambda の実行モデルに合わせた設定です。Lambda は 1 インスタンス＝同時 1 リクエストなので、
+インスタンスごとに大きなプールを持つと、スケール時に Aurora の接続上限を食い潰します。
+本格運用では RDS Proxy を挟みますが、トレーニング用途では <code>max: 1</code> で十分。</p>
+</div>
+
+<h2>Day 15: デプロイとマイグレーション</h2>
+
+<h3>4. シークレットの登録とデプロイ</h3>
+<pre><code>npx sst secret set OpenaiApiKey sk-xxxx --stage dev   # 値は Lesson 7 まで仮でも可
+npx sst deploy --stage dev</code></pre>
+<p><strong>初回は 15〜30 分かかります</strong>（Aurora クラスタと CloudFront の作成が遅い）。コーヒーを淹れながら、出力されるリソース名を眺めて「何が作られているか」を追ってください。完了すると CloudFront の URL が表示されます。</p>
+
+<h3>5. Aurora へのマイグレーション</h3>
+<p>Aurora は VPC 内にいるため、手元からは直接届きません。<code>sst.config.ts</code> の <code>bastion: true</code> がここで効きます：</p>
+<pre><code>npx sst tunnel --stage dev</code></pre>
+<p>トンネルが開いている間、link されたリソースへ手元から接続できます。別ターミナルで、Aurora 向けの接続情報を使って migrate を実行します（tunnel 起動時に表示される接続先を <code>DATABASE_URL</code> に組み立てて渡すのが手っ取り早い）：</p>
+<pre><code>DATABASE_URL="postgres://（tunnel が示す接続情報）" npx drizzle-kit migrate</code></pre>
+
+<div class="box learn">
+<p><strong>学びどころ：マイグレーションファイル方式がここで報われる</strong></p>
+<p>Lesson 2 で <code>push</code> ではなく generate → migrate を選んだ理由がこれです。<code>drizzle/</code> に積んだ SQL ファイルの列を
+そのまま Aurora に適用すれば、ローカルとまったく同じスキーマが再現されます。「DB が 2 つになった瞬間、
+マイグレーションは履歴で管理するしかなくなる」ことを体感してください。</p>
+</div>
+
+<h3>6. Better Auth の URL 設定</h3>
+<p>デプロイ先の URL を Better Auth に教える必要があります。<code>sst.config.ts</code> の Nextjs コンポーネントに環境変数を追加：</p>
+<pre><code>new sst.aws.Nextjs("Web", {
+  vpc,
+  link: [database, openaiApiKey],
+  environment: {
+    BETTER_AUTH_URL: "https://（CloudFront の URL）",
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
+  },
+});</code></pre>
+<p>（<code>process.env.BETTER_AUTH_SECRET</code> は <code>sst.config.ts</code> の実行時に <code>.env</code> から読まれます——SST は <code>.env</code> を自動ロードします。きれいにやるなら secret を <code>sst.Secret</code> にもう 1 本切る。URL は初回デプロイ後に判明するので、2 回目のデプロイで設定する流れで OK）</p>
+
+<h2>Day 16: 動作確認と後片付けの練習</h2>
+
+<h3>7. 本番相当での動作確認</h3>
+<p>CloudFront URL でサインアップ〜todo 作成〜タグ付けまで一通り実行します。</p>
+
+<div class="box warn">
+<p><strong>Aurora のコールドスタートを「観測」する</strong></p>
+<p>しばらく（デフォルトでは非アクティブ数分〜）放置すると Aurora は auto-pause します。
+その状態で最初のリクエストを送ると<strong>十数秒待たされる</strong>はず——これは requirements.md で許容済みの想定挙動です。
+ただし Server Action がタイムアウトする場合があるので、体感しておくこと。リロードで復帰します。
+「初回だけ遅い」を実際に観測することが、このアーキテクチャを選んだ判断の意味を理解する近道です。</p>
+</div>
+
+<h3>8. sst dev を知っておく（実行は任意）</h3>
+<p><code>sst dev</code> は「インフラは AWS 上の実物、Next.js は手元で実行」というハイブリッドな開発モードで、link されたリソース（Aurora、Secret）に手元のコードから <code>Resource</code> でアクセスできます。ただし今回の構成では 2 つ注意があります：</p>
+<ul>
+<li>ステージ指定なしの <code>npx sst dev</code> は <strong>personal ステージ（ユーザー名）に別スタックを新規作成</strong>します。VPC と Aurora クラスタがもう 1 組でき、課金も増えます。かといってデプロイ済みの dev ステージと <code>sst dev</code> を同一ステージで共用するのも非推奨です。</li>
+<li>手順 3 の <code>buildConnectionConfig()</code> は <code>DATABASE_URL</code> を優先するため、<code>.env</code> に <code>DATABASE_URL</code> がある限り、<code>sst dev</code> で起動しても接続先は Docker Postgres のままです。</li>
+</ul>
+<p>したがって Lesson 7〜8 の開発は <strong>Docker Postgres 相手の <code>npm run dev</code></strong> で進めます。<code>sst dev</code> を試すのは自由ですが、終わったら personal ステージのリソースを <code>npx sst remove</code> で必ず片付けてください。</p>
+
+<div class="box check">
+<p><strong>チェックポイント</strong></p>
+<ul>
+<li>CloudFront URL でアプリ全機能が動く</li>
+<li>Aurora が auto-pause → 再開する挙動を観測した</li>
+<li>AWS コンソールの Billing で課金状況を一度確認した</li>
+<li><code>sst.config.ts</code> の各行が何を作っているか説明できる</li>
+</ul>
+</div>
+
+<div class="box warn">
+<p><strong>つまずきポイント（山場その 2 の核心）</strong></p>
+<ul>
+<li>デプロイ失敗時はまずエラーメッセージの<strong>リソース名</strong>を見る。SST は Pulumi ベースなので、失敗しても再実行すれば途中から続きをやってくれる（冪等）。慌てて remove しない。</li>
+<li>Lambda から DB に届かない（接続タイムアウト）場合は、Nextjs コンポーネントに <code>vpc</code> を渡し忘れているのが定番。</li>
+<li>認証だけ壊れる場合は <code>BETTER_AUTH_URL</code> が CloudFront の URL と一致しているか、Cookie の secure 属性まわりを疑う。</li>
+<li>ハマったら 30 分で切り上げて SST の Discord／GitHub Discussions を検索する。初回デプロイの詰まりどころはほぼ既出。</li>
+</ul>
+</div>
+
+<h2>参考リンク</h2>
+<ul>
+<li><a href="https://sst.dev/docs/start/aws/nextjs/">SST — Next.js on AWS</a></li>
+<li><a href="https://sst.dev/docs/component/aws/aurora/">SST — Aurora コンポーネント</a></li>
+<li><a href="https://sst.dev/docs/reference/cli/">SST — CLI（deploy / dev / tunnel / secret / remove）</a></li>
+</ul>
+
+<div class="nav">
+<span><a href="lesson-05-tags-many-to-many.html">← Lesson 5</a></span>
+<span><a href="lesson-07-openai-extraction.html">Lesson 7: ブレインダンプ抽出 →</a></span>
+</div>
+
+</body>
+</html>
