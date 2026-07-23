@@ -13,6 +13,18 @@ services:
       # コンテナ外の保存場所:コンテナ内のパス
       # PostgreSQL がデータを書き込む /var/lib/postgresql/data を、pgdata という名前付きボリュームに紐付け
       - pgdata:/var/lib/postgresql/data
+  db_test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: braindump_todo_test
+    ports:
+      # ホスト側のポートを変更している
+      - "5433:5432"
+    tmpfs:
+      # テスト DB は揮発でよい（tmpfs で高速化・永続化しない）
+      - /var/lib/postgresql/data
 volumes:
   # 名前付きボリュームの宣言
   # downしてもデータを残す

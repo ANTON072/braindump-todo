@@ -7,7 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "check": "biome check --write"
+    "test": "vitest",
+    "check": "biome check --write",
+    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -33,10 +35,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.4.2",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
