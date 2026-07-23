@@ -8,6 +8,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { user } from "./auth-schema";
 
 export const priorityEnum = pgEnum("priority", ["low", "med", "high"]);
 export const statusEnum = pgEnum("status", ["open", "done"]);
@@ -16,7 +17,9 @@ export const todos = pgTable("todos", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
-  userId: text("user_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   notes: text("notes"),
   dueData: date("due_date"),
@@ -32,7 +35,9 @@ export const tags = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    userId: text("user_id").notNull(), // 後でFKを張る
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
   },
   // 同じユーザーが同じタグを2つ重複して作れない制約
