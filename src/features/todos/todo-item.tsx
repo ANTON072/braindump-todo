@@ -1,9 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { toggleTodoStatus, deleteTodo } from "./actions";
+import { deleteTodo, toggleTodoStatus } from "./actions";
 
 type Priority = "low" | "med" | "high";
 type Status = "open" | "done";
+
+type Tag = {
+  id: string;
+  name: string;
+};
 
 type Todo = {
   id: string;
@@ -13,6 +18,7 @@ type Todo = {
   priority: Priority;
   status: Status;
   createdAt: Date;
+  tags: Tag[];
 };
 
 const priorityLabel: Record<Priority, string> = {
@@ -21,7 +27,10 @@ const priorityLabel: Record<Priority, string> = {
   high: "高",
 };
 
-const priorityVariant: Record<Priority, "secondary" | "default" | "destructive"> = {
+const priorityVariant: Record<
+  Priority,
+  "secondary" | "default" | "destructive"
+> = {
   low: "secondary",
   med: "default",
   high: "destructive",
@@ -47,6 +56,15 @@ export function TodoItem({ todo }: Props) {
         )}
         {todo.dueData && (
           <p className="text-xs text-muted-foreground">期限: {todo.dueData}</p>
+        )}
+        {todo.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {todo.tags.map((tag) => (
+              <Badge key={tag.id} variant="outline">
+                {tag.name}
+              </Badge>
+            ))}
+          </div>
         )}
       </div>
       <div className="flex flex-col items-end gap-2">

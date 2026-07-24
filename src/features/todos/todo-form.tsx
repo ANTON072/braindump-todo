@@ -42,7 +42,7 @@ export function TodoForm() {
       />
       <Input {...getInputProps(fields.dueData, { type: "date" })} />
       <Input
-        {...getInputProps(fields.tagInput, { type: "text" })}
+        {...getInputProps(fields.tagsInput, { type: "text" })}
         placeholder="タグ（カンマ区切り: 買い物, 仕事）"
       />
       <select
