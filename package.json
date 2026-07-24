@@ -9,7 +9,9 @@
     "start": "next start",
     "test": "vitest",
     "check": "biome check --write",
-    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts"
+    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts",
+    "studio": "drizzle-kit studio --config  drizzle.config.ts",
+    "studio:test": "drizzle-kit studio --config  drizzle.test.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -4,12 +4,14 @@ import {
   getFormProps,
   getInputProps,
   getSelectProps,
+  getTextareaProps,
   useForm,
 } from "@conform-to/react";
 import { parseWithZod } from "@conform-to/zod/v4";
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { createTodo } from "./actions";
 import { todoSchema } from "./shema";
 
@@ -34,10 +36,14 @@ export function TodoForm() {
         placeholder="やること"
       />
       <p className="text-sm text-red-600">{fields.title.errors}</p>
+      <Textarea
+        {...getTextareaProps(fields.notes)}
+        placeholder="メモ（任意）"
+      />
       <Input {...getInputProps(fields.dueData, { type: "date" })} />
       <select
         {...getSelectProps(fields.priority)}
-        className="border rounded p-2"
+        className="border rounded p-2 w-full"
       >
         <option value="low">低</option>
         <option value="med">中</option>
