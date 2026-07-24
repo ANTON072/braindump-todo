@@ -5,12 +5,40 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { todos } from "@/db/schema";
+import { attachTagsToTodo, normalizeTagNames } from "../tags/upsert-tags";
 
 // dbでもtransactionでも受けられるように型を緩める
 // Parametersは関数の引数の型を配列として取り出すユーティリティ型
 // db.transactionの第1引数はコールバック関数なので、次はそのコールバックにParametersをかけてtxの型を取り出す、という入れ子構造
 // サービス関数がトランザクション内から呼ばれることもあるので、dbだけではなくtxも受け取れるように設計する必要がある
 type Database = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type CreateTodoInput = {
+  title: string;
+  dueDate?: string;
+  priority?: "low" | "med" | "high";
+  tagsInput?: string;
+};
+
+export async function createTodoForUser(
+  tx: Tx,
+  userId: string,
+  input: CreateTodoInput,
+) {
+  const { tagsInput, ...todoValues } = input;
+  const [todo] = await tx
+    .insert(todos)
+    .values({ ...todoValues, userId })
+    .returning();
+  await attachTagsToTodo(
+    tx,
+    userId,
+    todo.id,
+    normalizeTagNames(tagsInput ?? ""),
+  );
+  return todo;
+}
 
 export async function toggleTodoStatusForUser(
   database: Database,

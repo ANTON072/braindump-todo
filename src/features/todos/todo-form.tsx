@@ -41,6 +41,10 @@ export function TodoForm() {
         placeholder="メモ（任意）"
       />
       <Input {...getInputProps(fields.dueData, { type: "date" })} />
+      <Input
+        {...getInputProps(fields.tagInput, { type: "text" })}
+        placeholder="タグ（カンマ区切り: 買い物, 仕事）"
+      />
       <select
         {...getSelectProps(fields.priority)}
         className="border rounded p-2 w-full"

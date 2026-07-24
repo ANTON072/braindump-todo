@@ -5,4 +5,5 @@ export const todoSchema = z.object({
   notes: z.string().max(2000).optional(),
   dueData: z.string().date().optional(),
   priority: z.enum(["low", "med", "high"]).default("med"),
+  tagInput: z.string().max(500).optional(),
 });
