@@ -11,12 +11,12 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::715627328449:role/gha-deploy
           aws-region: ap-northeast-1
@@ -29,12 +29,12 @@ jobs:
     # この環境に「必須レビュアー」を設定して承認ゲートにする
     environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::715627328449:role/gha-deploy
           aws-region: ap-northeast-1
