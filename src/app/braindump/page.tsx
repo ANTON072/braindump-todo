@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { runBraindumpExtraction } from "@/features/braindump/actions";
+import { BraindumpForm } from "@/features/braindump/braindump-form";
 import type { ExtractedTask } from "@/features/braindump/schema";
 
 const MAX_LENGTH = 4000;
@@ -66,18 +67,16 @@ export default function BraindumpPage() {
           {extractedTasks.length === 0 ? (
             <p className="text-sm text-muted-foreground">タスクが見つかりませんでした。</p>
           ) : (
-            <ul className="space-y-2">
-              {extractedTasks.map((task, i) => (
-                <li key={i} className="rounded border p-3 space-y-1">
-                  <p className="font-medium">{task.title}</p>
-                  <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                    {task.dueDate && <span>期限: {task.dueDate}</span>}
-                    {task.priority && <span>優先度: {task.priority}</span>}
-                    {task.tags.length > 0 && <span>タグ: {task.tags.join(", ")}</span>}
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <BraindumpForm
+              defaultValue={{
+                tasks: extractedTasks.map((task) => ({
+                  title: task.title,
+                  dueDate: task.dueDate ?? undefined,
+                  priority: task.priority ?? "med",
+                  tagsInput: task.tags.join(", "),
+                })),
+              }}
+            />
           )}
         </section>
       )}
