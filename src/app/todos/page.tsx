@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { todos } from "@/db/schema";
 import { TodoForm } from "@/features/todos/todo-form";
 import { TodoItem } from "@/features/todos/todo-item";
+import { LogoutButton } from "@/features/todos/logout-button";
 import { requireUserId } from "@/lib/session";
 
 export default async function TodosPage() {
@@ -27,6 +28,9 @@ export default async function TodosPage() {
 
   return (
     <main className="mx-auto max-w-2xl space-y-6 p-8">
+      <div className="flex justify-end">
+        <LogoutButton />
+      </div>
       <TodoForm />
       <ul className="space-y-2">
         {todosWithTags.map((todo) => (

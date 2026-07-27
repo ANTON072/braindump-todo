@@ -8,6 +8,9 @@ import * as authSchema from "./auth-schema";
 import * as schema from "./schema";
 
 function buildConnectionConfig() {
+  if (process.env.TEST_DATABASE_URL) {
+    return { connectionString: process.env.TEST_DATABASE_URL };
+  }
   if (process.env.DATABASE_URL) {
     const isLocal =
       process.env.DATABASE_URL.includes("localhost") ||
