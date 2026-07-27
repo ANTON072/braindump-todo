@@ -107,6 +107,41 @@ Open Drizzle Studio:
 pnpm studio
 ```
 
+## AWS Architecture
+
+```mermaid
+graph TB
+    User(["User"])
+    OpenAI["OpenAI API"]
+
+    subgraph AWS["AWS Cloud"]
+        CF["CloudFront<br/>CDN"]
+        S3["S3<br/>Static Assets"]
+        SSM["SSM Parameter Store<br/>Secrets"]
+
+        subgraph VPC["VPC"]
+            subgraph Public["Public Subnet"]
+                Bastion["Bastion<br/>EC2"]
+                NAT["NAT Gateway<br/>EC2"]
+            end
+
+            subgraph Private["Private Subnet"]
+                Lambda["Lambda<br/>Next.js (OpenNext)"]
+                Aurora[("Aurora Serverless v2<br/>PostgreSQL")]
+            end
+        end
+    end
+
+    User -->|"HTTPS"| CF
+    CF -->|"static assets"| S3
+    CF -->|"SSR requests"| Lambda
+    Lambda -->|"DB connection"| Aurora
+    Lambda -->|"internet access"| NAT
+    NAT -->|"API calls"| OpenAI
+    Bastion -.->|"SSH tunnel"| Aurora
+    Lambda -.->|"fetch secrets"| SSM
+```
+
 ## Deploying to AWS
 
 ```bash
