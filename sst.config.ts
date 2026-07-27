@@ -11,7 +11,8 @@ export default $config({
       // デプロイ先クラウド
       home: "aws",
       providers: {
-        aws: { profile: "braindump" },
+        // CIではOIDCで取得した環境変数の認証情報を使うため、ローカル専用のプロファイル指定は外す
+        aws: { profile: process.env.CI ? undefined : "braindump" },
       },
     };
   },
