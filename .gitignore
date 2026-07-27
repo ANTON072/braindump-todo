@@ -42,3 +42,9 @@ next-env.d.ts
 scripts/seed-users.ts
 
 note.txt
+
+# sst
+.sst
+
+# open-next
+.open-next

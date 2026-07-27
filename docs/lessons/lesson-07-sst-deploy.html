@@ -49,6 +49,16 @@ th { background:var(--code-bg); }
 
 <h2>Day 22: SST の初期化と構成</h2>
 
+<div class="box warn">
+<p><strong>AWS Profile の設定が必要です</strong></p>
+<p>このプロジェクトでは AWS Profile <code>braindump</code> を使います。SST CLI には <code>--profile</code> フラグがないため、<code>sst.config.ts</code> の <code>providers.aws.profile</code> で指定します（後述）。</p>
+<p>また、<code>~/.aws/config</code> が SSO ベースの設定の場合、初回および SSO セッション期限切れ時に下記コマンドでログインが必要です：</p>
+<pre><code>aws sso login --profile braindump</code></pre>
+<p>ログイン後、接続確認：</p>
+<pre><code>aws sts get-caller-identity --profile braindump</code></pre>
+<p>正しく設定されていれば Account ID と ARN が表示されます。</p>
+</div>
+
 <h3>1. 初期化</h3>
 <pre><code>pnpm dlx sst@latest init</code></pre>
 <p>Next.js プロジェクトを自動検出し、<code>sst.config.ts</code> が生成されます。</p>
@@ -62,6 +72,9 @@ export default $config({
       name: "braindump-todo",
       removal: input?.stage === "production" ? "retain" : "remove",
       home: "aws",
+      providers: {
+        aws: { profile: "braindump" },
+      },
     };
   },
   async run() {
@@ -98,12 +111,19 @@ import { Pool } from "pg";
 // Next.js 16（ESM / Turbopack）では require ではなく import で読む。
 // Resource は遅延評価の proxy なので、ローカルで触らなければ副作用はない。
 import { Resource } from "sst";
+import * as authSchema from "./auth-schema";
 import * as schema from "./schema";
 
 function buildConnectionConfig() {
-  // ローカル開発（Docker Postgres）は DATABASE_URL を使う
   if (process.env.DATABASE_URL) {
-    return { connectionString: process.env.DATABASE_URL };
+    const isLocal =
+      process.env.DATABASE_URL.includes("localhost") ||
+      process.env.DATABASE_URL.includes("127.0.0.1");
+    return {
+      connectionString: process.env.DATABASE_URL,
+      // ローカル Docker 以外（Aurora トンネル経由）は SSL 必須
+      ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
+    };
   }
   // SST 環境では link された Aurora から取る
   return {
@@ -112,12 +132,24 @@ function buildConnectionConfig() {
     user: Resource.Database.username,
     password: Resource.Database.password,
     database: Resource.Database.database,
+    // Aurora は SSL 必須。自己署名証明書のため検証は無効化
+    ssl: { rejectUnauthorized: false },
   };
 }
 
 const pool = new Pool({ ...buildConnectionConfig(), max: 1 });
 
-export const db = drizzle(pool, { schema });</code></pre>
+export const db = drizzle(pool, {
+  schema: { ...schema, ...authSchema },
+});</code></pre>
+
+<div class="box warn">
+<p><strong>Aurora は SSL 接続が必須</strong></p>
+<p>Aurora PostgreSQL は暗号化なしの接続を拒否します（<code>no pg_hba.conf entry for host ... no encryption</code>）。
+<code>ssl: { rejectUnauthorized: false }</code> は Aurora が自己署名証明書を使うための設定で、通信自体は暗号化されています。</p>
+<p>また、ローカルの <code>.env</code> に書いた <code>DATABASE_URL</code> は SST がビルド時に Lambda 環境へ持ち込んでしまいます。
+Lambda 上では <code>Resource.Database</code> を使わせるために、次の手順 6 で <code>DATABASE_URL: ""</code> で上書きします。</p>
+</div>
 
 <div class="box learn">
 <p><strong>学びどころ：Lambda では接続プールを小さく</strong></p>
@@ -128,16 +160,53 @@ export const db = drizzle(pool, { schema });</code></pre>
 
 <h2>Day 23: デプロイとマイグレーション</h2>
 
-<h3>4. シークレットの登録とデプロイ</h3>
+<h3>4. next.config.ts の設定</h3>
+<p>初回デプロイ時は <code>Resource.Database</code> の型定義がまだ生成されておらず、TypeScript エラーでビルドが止まります。<code>next.config.ts</code> にビルド時の型チェックをスキップする設定を追加します：</p>
+<pre><code>const nextConfig: NextConfig = {
+  // SSTデプロイ時はResource型がまだ生成されていないためスキップ
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+};</code></pre>
+<div class="box learn">
+<p><strong>なぜ型チェックをスキップするのか</strong></p>
+<p><code>Resource.Database</code> の型は <code>.sst/types.generated.d.ts</code> に生成されますが、このファイルはデプロイが一度完走して初めて作られます。「デプロイに成功しないと型が生成されない、型がないとビルドが通らない」という鶏と卵の問題です。一度デプロイが完走すれば以後は型が存在するためエラーは出なくなります。型チェックはローカル開発（<code>pnpm dev</code>）時に行えば十分です。</p>
+</div>
+
+<h3>5. シークレットの登録とデプロイ</h3>
 <pre><code>pnpm dlx sst secret set OpenaiApiKey sk-xxxx --stage dev   # 値は Lesson 8 まで仮でも可
 pnpm dlx sst deploy --stage dev</code></pre>
 <p><strong>初回は 15〜30 分かかります</strong>（Aurora クラスタと CloudFront の作成が遅い）。コーヒーを淹れながら、出力されるリソース名を眺めて「何が作られているか」を追ってください。完了すると CloudFront の URL が表示されます。</p>
 
-<h3>5. Aurora へのマイグレーション</h3>
+<div class="box warn">
+<p><strong><code>.next</code> ディレクトリの権限エラーが出る場合</strong></p>
+<p>SST のビルドプロセスが <code>.next</code> ディレクトリ内に root 権限のファイルを作ることがあります。
+<code>EPERM: operation not permitted, open '.next/trace'</code> というエラーが出たら、<code>.next</code> を削除してからデプロイしてください：</p>
+<pre><code>sudo rm -rf ./.next && pnpm dlx sst deploy --stage dev</code></pre>
+<p>繰り返し発生するのを防ぐため、<code>package.json</code> にデプロイ用スクリプトを追加しておくと便利です：</p>
+<pre><code>"deploy": "rm -rf ./.next && pnpm dlx sst deploy --stage dev"</code></pre>
+<p>以降は <code>pnpm deploy</code> だけで済みます（<code>rm -rf</code> は相対パスのため安全）。</p>
+</div>
+
+<div class="box warn">
+<p><strong>Vpc コンポーネントのバージョン不一致エラーが出る場合</strong></p>
+<p>途中で失敗したデプロイの状態が残っていると、SST のバージョンアップによって Vpc コンポーネントのバージョンが合わなくなることがあります：</p>
+<pre><code>There is a new version of "Vpc" that has breaking changes.
+To continue using the previous version, rename "Vpc" to "Vpc.v1".</code></pre>
+<p>エラーの指示どおり <code>sst.config.ts</code> 内の <code>"Vpc"</code> を <code>"Vpc.v1"</code> にリネームして再実行してください。SST が状態ファイルと一致させてくれます。</p>
+</div>
+
+<h3>6. Aurora へのマイグレーション</h3>
 <p>Aurora は VPC 内にいるため、手元からは直接届きません。<code>sst.config.ts</code> の <code>bastion: true</code> がここで効きます：</p>
 <pre><code>pnpm dlx sst tunnel --stage dev</code></pre>
-<p>トンネルが開いている間、link されたリソースへ手元から接続できます。別ターミナルで、Aurora 向けの接続情報を使って migrate を実行します（tunnel 起動時に表示される接続先を <code>DATABASE_URL</code> に組み立てて渡すのが手っ取り早い）：</p>
-<pre><code>DATABASE_URL="postgres://（tunnel が示す接続情報）" pnpm exec drizzle-kit migrate</code></pre>
+<p>初回実行時に <code>Make sure you have installed the tunnel with sudo sst tunnel install</code> と表示されたら、別ターミナルで先にインストールしてください：</p>
+<pre><code>sudo pnpm dlx sst tunnel install</code></pre>
+<p>トンネルが <code>Waiting for connections...</code> と表示されたら準備完了です。Aurora の接続情報を取得します（別ターミナルで）：</p>
+<pre><code>pnpm dlx sst shell --stage dev node -e "const {Resource}=require('sst');const d=Resource.Database;console.log('postgres://'+d.username+':'+d.password+'@'+d.host+':'+d.port+'/'+d.database)"</code></pre>
+<p>表示された URL を使ってマイグレーションを実行します。Aurora は SSL 必須のため <code>NODE_TLS_REJECT_UNAUTHORIZED=0</code> と <code>?sslmode=require</code> が必要です：</p>
+<pre><code>NODE_TLS_REJECT_UNAUTHORIZED=0 \
+DATABASE_URL="postgres://postgres:パスワード@ホスト:5432/braindump_todo?sslmode=require" \
+pnpm exec drizzle-kit migrate</code></pre>
 
 <div class="box learn">
 <p><strong>学びどころ：マイグレーションファイル方式がここで報われる</strong></p>
@@ -146,21 +215,33 @@ pnpm dlx sst deploy --stage dev</code></pre>
 マイグレーションは履歴で管理するしかなくなる」ことを体感してください。</p>
 </div>
 
-<h3>6. Better Auth の URL 設定</h3>
-<p>デプロイ先の URL を Better Auth に教える必要があります。<code>sst.config.ts</code> の Nextjs コンポーネントに環境変数を追加：</p>
+<h3>7. Better Auth の URL 設定と再デプロイ</h3>
+<p>デプロイ先の URL を Better Auth に教える必要があります。また、ローカルの <code>.env</code> にある <code>DATABASE_URL</code>（Docker の localhost を指す値）が Lambda 環境に持ち込まれないよう空文字で上書きします。<code>sst.config.ts</code> の Nextjs コンポーネントを更新してください：</p>
 <pre><code>new sst.aws.Nextjs("Web", {
   vpc,
   link: [database, openaiApiKey],
   environment: {
     BETTER_AUTH_URL: "https://（CloudFront の URL）",
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
+    // ローカルの DATABASE_URL を Lambda に持ち込まない（Resource.Database を使わせる）
+    DATABASE_URL: "",
   },
 });</code></pre>
-<p>（<code>process.env.BETTER_AUTH_SECRET</code> は <code>sst.config.ts</code> の実行時に <code>.env</code> から読まれます——SST は <code>.env</code> を自動ロードします。きれいにやるなら secret を <code>sst.Secret</code> にもう 1 本切る。URL は初回デプロイ後に判明するので、2 回目のデプロイで設定する流れで OK）</p>
+<p><code>process.env.BETTER_AUTH_SECRET</code> は <code>sst.config.ts</code> の実行時に <code>.env</code> から読まれます——SST は <code>.env</code> を自動ロードします。URL は初回デプロイ後に判明するので、2 回目のデプロイで設定する流れで OK。</p>
+<p>更新後に再デプロイします：</p>
+<pre><code>pnpm deploy</code></pre>
+
+<h3>8. ユーザーの事前登録</h3>
+<p>認証は招待制のため、Aurora に初期ユーザーを登録する必要があります。トンネルを開いたまま、<code>scripts/seed-users.ts</code> のメールアドレスとパスワードを自分のものに書き換えてから実行してください：</p>
+<pre><code>NODE_TLS_REJECT_UNAUTHORIZED=0 \
+BETTER_AUTH_DISABLE_SIGNUP=false \
+DATABASE_URL="postgres://postgres:パスワード@ホスト:5432/braindump_todo?sslmode=require" \
+pnpm exec tsx scripts/seed-users.ts</code></pre>
+<p><code>Registered: あなたのメールアドレス</code> と表示されれば成功です。</p>
 
 <h2>Day 24: 動作確認と後片付けの練習</h2>
 
-<h3>7. 本番相当での動作確認</h3>
+<h3>9. 本番相当での動作確認</h3>
 <p>CloudFront URL でサインアップ〜todo 作成〜タグ付けまで一通り実行します。</p>
 
 <div class="box warn">
@@ -171,7 +252,7 @@ pnpm dlx sst deploy --stage dev</code></pre>
 「初回だけ遅い」を実際に観測することが、このアーキテクチャを選んだ判断の意味を理解する近道です。</p>
 </div>
 
-<h3>8. sst dev を知っておく（実行は任意）</h3>
+<h3>10. sst dev を知っておく（実行は任意）</h3>
 <p><code>sst dev</code> は「インフラは AWS 上の実物、Next.js は手元で実行」というハイブリッドな開発モードで、link されたリソース（Aurora、Secret）に手元のコードから <code>Resource</code> でアクセスできます。ただし今回の構成では 2 つ注意があります：</p>
 <ul>
 <li>ステージ指定なしの <code>pnpm dlx sst dev</code> は <strong>personal ステージ（ユーザー名）に別スタックを新規作成</strong>します。VPC と Aurora クラスタがもう 1 組でき、課金も増えます。かといってデプロイ済みの dev ステージと <code>sst dev</code> を同一ステージで共用するのも非推奨です。</li>
@@ -192,10 +273,17 @@ pnpm dlx sst deploy --stage dev</code></pre>
 <div class="box warn">
 <p><strong>つまずきポイント（山場その 2 の核心）</strong></p>
 <ul>
-<li>デプロイ失敗時はまずエラーメッセージの<strong>リソース名</strong>を見る。SST は Pulumi ベースなので、失敗しても再実行すれば途中から続きをやってくれる（冪等）。慌てて remove しない。</li>
-<li>Lambda から DB に届かない（接続タイムアウト）場合は、Nextjs コンポーネントに <code>vpc</code> を渡し忘れているのが定番。</li>
-<li>認証だけ壊れる場合は <code>BETTER_AUTH_URL</code> が CloudFront の URL と一致しているか、Cookie の secure 属性まわりを疑う。</li>
-<li>ハマったら 30 分で切り上げて SST の Discord／GitHub Discussions を検索する。初回デプロイの詰まりどころはほぼ既出。</li>
+<li><strong>デプロイ失敗時は慌てて remove しない</strong> — SST は Pulumi ベースで状態管理しているため、失敗しても再実行すれば途中から続きをやってくれる（冪等）。まずエラーメッセージのリソース名を読む。</li>
+<li><strong>SSO セッション切れ</strong> — <code>failed to refresh cached credentials</code> が出たら <code>aws sso login --profile braindump</code> を実行してから再試行。SSO トークンは数時間〜1日で期限切れになる。</li>
+<li><strong>SST プラグインの権限エラー</strong> — <code>mkdir /Library/Application Support/sst/plugins: permission denied</code> が出たら <code>sudo chown -R $USER "/Library/Application Support/sst/"</code> で所有権を修正する。</li>
+<li><strong><code>.next</code> ディレクトリの権限エラー</strong> — <code>EPERM: operation not permitted, open '.next/trace'</code> が出たら <code>sudo rm -rf ./.next</code> してからデプロイし直す。<code>pnpm deploy</code> スクリプトを使えば毎回自動でクリアされる。</li>
+<li><strong>Vpc コンポーネントのバージョン不一致</strong> — 途中失敗した状態が残っていると SST のバージョンアップ後に不一致が起きる。エラーに従って <code>"Vpc"</code> を <code>"Vpc.v1"</code> にリネームして再実行。</li>
+<li><strong>TypeScript エラーでビルドが止まる</strong> — <code>Property 'Database' does not exist on type 'Resource'</code> は初回デプロイ前に必ず出る。<code>next.config.ts</code> に <code>typescript: { ignoreBuildErrors: true }</code> を追加する。</li>
+<li><strong>Lambda が localhost:5432 に接続しようとする</strong> — ローカルの <code>.env</code> の <code>DATABASE_URL</code> が Lambda 環境に持ち込まれることで起きる。<code>sst.config.ts</code> の <code>environment</code> に <code>DATABASE_URL: ""</code> を追加して上書きする。</li>
+<li><strong>Aurora への接続で SSL エラー</strong> — Aurora は SSL 必須。<code>src/db/index.ts</code> に <code>ssl: { rejectUnauthorized: false }</code> を追加する。tunnel 経由のコマンド（migrate・seed）にも <code>NODE_TLS_REJECT_UNAUTHORIZED=0</code> と <code>?sslmode=require</code> が必要。</li>
+<li><strong>Lambda から DB に届かない（接続タイムアウト）</strong> — Nextjs コンポーネントに <code>vpc</code> を渡し忘れているのが定番。</li>
+<li><strong>認証だけ壊れる</strong> — <code>BETTER_AUTH_URL</code> が CloudFront の URL と一致しているか確認。Cookie の secure 属性まわりも疑う。</li>
+<li><strong>ハマったら 30 分で切り上げる</strong> — SST の Discord／GitHub Discussions を検索する。初回デプロイの詰まりどころはほぼ既出。</li>
 </ul>
 </div>
 
