@@ -215,6 +215,56 @@ pnpm dlx sst secret set BetterAuthSecret "$(openssl rand -base64 32)" --stage pr
 実行のたびに<strong>短命の一時クレデンシャル</strong>を AWS から受け取る形にします。AWS 側に GitHub を信頼する IAM ロール（<code>gha-deploy</code> など）を 1 つ作り、その ARN だけを CI に渡します。</p>
 </div>
 
+<h3>7-1. AWS 側の準備：OIDC プロバイダーと IAM ロールの作成</h3>
+<p>ワークフローを動かす前に、AWS 側で2つの作業が必要です。</p>
+
+<p><strong>① OIDC プロバイダーの登録</strong><br>
+AWS コンソール → IAM → Identity providers → 「Add provider」から以下を登録します：</p>
+<ul>
+  <li>Provider type: <code>OpenID Connect</code></li>
+  <li>Provider URL: <code>https://token.actions.githubusercontent.com</code></li>
+  <li>Audience: <code>sts.amazonaws.com</code></li>
+</ul>
+<p>これにより AWS が「GitHub が発行したトークンは本物か」を検証できるようになります。</p>
+
+<p><strong>② IAM ロール（<code>gha-deploy</code>）の作成</strong><br>
+IAM → Roles → 「Create role」から作成します。</p>
+<ul>
+  <li>Trusted entity type: <code>Web identity</code></li>
+  <li>Identity provider: 先ほど登録した <code>token.actions.githubusercontent.com</code></li>
+  <li>Audience: <code>sts.amazonaws.com</code></li>
+</ul>
+<p>作成後、信頼ポリシー（Trust policy）を以下に書き換えて<strong>リポジトリを特定のものに限定</strong>します。これをしないと他のリポジトリからもこのロールを引き受けられてしまいます：</p>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::&lt;ACCOUNT_ID&gt;:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:&lt;org&gt;/&lt;repo&gt;:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}</code></pre>
+<p><code>sub</code> の条件を <code>refs/heads/main</code> に絞ることで、main ブランチのプッシュ時のみロールを引き受けられるようにしています。</p>
+
+<p>権限（Permissions）には SST デプロイに必要なポリシーをアタッチします。開発中は <code>AdministratorAccess</code> で始め、安定したら最小権限に絞るのが現実的です。</p>
+
+<p><strong>③ アカウント ID を GitHub Secrets に登録</strong><br>
+ロールの ARN に含まれるアカウント ID（12桁）を GitHub リポジトリの Secrets に登録しておくと、ワークフローにハードコードせずに済みます：</p>
+<pre><code># リポジトリ → Settings → Secrets and variables → Actions → New repository secret
+Name: AWS_ACCOUNT_ID
+Value: 123456789012（実際のアカウント ID）</code></pre>
+
 <h3>8. デプロイのワークフロー</h3>
 <p><code>.github/workflows/deploy.yml</code>。main マージで staging に出し、<strong>production は GitHub Environments の承認</strong>を通してから昇格します：</p>
 <pre><code>name: Deploy

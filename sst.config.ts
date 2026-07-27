@@ -35,15 +35,16 @@ export default $config({
     const openaiApiKey = new sst.Secret("OpenaiApiKey");
 
     // Next.jsアプリをAWSにデプロイ
-    new sst.aws.Nextjs("Web", {
+    const web = new sst.aws.Nextjs("Web", {
       vpc,
       link: [database, openaiApiKey],
       environment: {
-        BETTER_AUTH_URL: "https://d7ngydn56zfic.cloudfront.net",
-        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
+        BETTER_AUTH_SECRET: new sst.Secret("BetterAuthSecret").value,
         // ローカルの.envのDATABASE_URLをLambdaに持ち込まない（Resource.Databaseを使わせる）
         DATABASE_URL: "",
       },
     });
+
+    return { url: web.url };
   },
 });

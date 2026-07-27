@@ -1,0 +1,41 @@
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write   # OIDC で一時クレデンシャルを受け取るために必須
+  contents: read
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::715627328449:role/gha-deploy
+          aws-region: ap-northeast-1
+      - run: pnpm dlx sst deploy --stage staging
+
+  deploy-production:
+    # staging が成功しないと動かない
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    # この環境に「必須レビュアー」を設定して承認ゲートにする
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::715627328449:role/gha-deploy
+          aws-region: ap-northeast-1
+      - run: pnpm dlx sst deploy --stage production

@@ -7,12 +7,14 @@
     "build": "next build",
     "deploy": "rm -rf ./.next && pnpm dlx sst deploy --stage dev",
     "check": "biome check --write",
-    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts",
     "dev": "next dev",
     "start": "next start",
     "studio": "drizzle-kit studio --config  drizzle.config.ts",
     "studio:test": "drizzle-kit studio --config  drizzle.test.config.ts",
-    "test": "vitest"
+    "lint": "biome ci .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

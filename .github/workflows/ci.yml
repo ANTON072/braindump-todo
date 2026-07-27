@@ -1,0 +1,76 @@
+name: CI
+on:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: braindump_todo_test
+        ports:
+          - 5433:5432
+        # DBが受付可能になるまで待つ（これが無いと接続拒否で不安定になる）
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/braindump_todo_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:push:test # テストDBにスキーマを流す
+      - run: pnpm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: braindump_todo_test
+        ports: [ "5433:5432" ]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    env:
+      # playwright.config の reuseExistingServer:false を効かせる
+      CI: "true"
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/braindump_todo_test
+      # dev サーバ起動に必要な最小 env（本物である必要はない）
+      BETTER_AUTH_SECRET: ci-dummy-secret-please-change
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_DISABLE_SIGNUP: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:push:test
+      - run: pnpm exec playwright test
