@@ -6,31 +6,32 @@
 
 declare module "sst" {
   export interface Resource {
-    "Database": {
-      "clusterArn": string
-      "database": string
-      "host": string
-      "password": string
-      "port": number
-      "reader": string
-      "secretArn": string
-      "type": "sst.aws.Aurora"
-      "username": string
-    }
-    "OpenaiApiKey": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
+    Database: {
+      clusterArn: string;
+      database: string;
+      host: string;
+      password: string;
+      port: number;
+      reader: string;
+      secretArn: string;
+      type: "sst.aws.Aurora";
+      username: string;
+    };
+    OpenaiApiKey: {
+      type: "sst.sst.Secret";
+      value: string;
+    };
     "Vpc.v1": {
-      "bastion": string
-      "type": "sst.aws.Vpc"
-    }
-    "Web": {
-      "type": "sst.aws.Nextjs"
-      "url": string
-    }
+      bastion: string;
+      type: "sst.aws.Vpc";
+    };
+    Web: {
+      type: "sst.aws.Nextjs";
+      url: string;
+    };
   }
 }
 
-import "sst"
-export {}
+import "sst";
+
+export {};

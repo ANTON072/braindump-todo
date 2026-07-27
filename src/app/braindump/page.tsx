@@ -12,7 +12,9 @@ const MAX_LENGTH = 4000;
 export default function BraindumpPage() {
   const [rawText, setRawText] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
-  const [extractedTasks, setExtractedTasks] = useState<ExtractedTask[] | null>(null);
+  const [extractedTasks, setExtractedTasks] = useState<ExtractedTask[] | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function handleExtract() {
@@ -54,7 +56,9 @@ export default function BraindumpPage() {
           </span>
         </div>
         {isExtracting && (
-          <p className="text-sm text-muted-foreground">抽出中… ⌛（数秒かかります）</p>
+          <p className="text-sm text-muted-foreground">
+            抽出中… ⌛（数秒かかります）
+          </p>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
@@ -65,7 +69,9 @@ export default function BraindumpPage() {
             {extractedTasks.length} 件のタスクを抽出しました
           </h2>
           {extractedTasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">タスクが見つかりませんでした。</p>
+            <p className="text-sm text-muted-foreground">
+              タスクが見つかりませんでした。
+            </p>
           ) : (
             <BraindumpForm
               defaultValue={{

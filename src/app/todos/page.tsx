@@ -1,9 +1,9 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { todos } from "@/db/schema";
+import { LogoutButton } from "@/features/todos/logout-button";
 import { TodoForm } from "@/features/todos/todo-form";
 import { TodoItem } from "@/features/todos/todo-item";
-import { LogoutButton } from "@/features/todos/logout-button";
 import { requireUserId } from "@/lib/session";
 
 export default async function TodosPage() {
