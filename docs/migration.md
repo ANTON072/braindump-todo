@@ -7,9 +7,9 @@ pnpm drizzle-kit generate   # スキーマ変更を SQL ファイルに書き出
 pnpm drizzle-kit migrate    # SQL ファイルを適用する
 ```
 
-## Aurora（dev ステージ）
+## Aurora（dev / staging / production）
 
-Aurora は VPC 内にあるため、SST の bastion（踏み台）経由でトンネルを張ってから接続する。
+Aurora は VPC 内にあるため、SST の bastion（踏み台）経由でトンネルを張ってから接続する。以下は `dev` の例。`staging` / `production` に対して実行する場合は、**すべてのコマンドの `--stage` と DATABASE_URL のホスト名を対象ステージのものに揃える**こと（`--stage staging` のトンネルに `dev` の URL で繋ぐ、といった不一致が接続失敗の典型原因）。
 
 ### 1. SSO ログイン（セッション切れの場合）
 
@@ -61,3 +61,19 @@ pnpm exec tsx scripts/seed-users.ts
 ```
 
 `Registered: メールアドレス` と表示されれば成功。
+
+## トラブルシューティング
+
+### `drizzle-kit migrate` が「applying migrations...」で止まる／何も起きずに終わる
+
+原因は **SSL 未指定**。Aurora は SSL 必須（`pg_hba.conf` で暗号化なし接続を拒否）だが、`drizzle-kit` が使う `pg` ドライバはデフォルトで暗号化なしで接続するため弾かれる。`pg` ドライバに直接接続すると次のエラーで確認できる：
+
+```
+no pg_hba.conf entry for host "10.0.x.x", user "postgres", database "braindump_todo", no encryption
+```
+
+**紛らわしい点**：TablePlus など DB クライアントは SSL mode が `PREFERRED` なので普通に繋がる。そのため「クライアントでは中身が見えているのに migrate だけ通らない」という状態になり、原因が DB ではなく SSL 設定にあることに気づきにくい。
+
+**対処**：DATABASE_URL に SSL パラメータを付ける。この手順書の Aurora セクションのコマンド（`NODE_TLS_REJECT_UNAUTHORIZED=0` + `?sslmode=require`）を使えば回避できる。URL 末尾に `?sslmode=no-verify` を付けるだけでも可（この場合 `NODE_TLS_REJECT_UNAUTHORIZED=0` は不要）。
+
+なお、ローカルの Docker Postgres は SSL 不要なので、ローカルでは付けなくても通る。この差分がリモートで初めて露呈する。

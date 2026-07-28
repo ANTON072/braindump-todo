@@ -35,12 +35,24 @@ export default $config({
     // 実際の値はCLIで別途セットし、コードには埋め込まない
     const openaiApiKey = new sst.Secret("OpenaiApiKey");
 
+    // better-authはOriginヘッダをBETTER_AUTH_URL由来の値と照合する。
+    // デプロイ先のCloudFront URLと一致しないとログインが「Invalid origin」で失敗する。
+    // URLは初回デプロイ後に確定するため、確定後にここへ登録して再デプロイする（Lesson 7/11の流儀）。
+    // 未登録のステージ（次のnext devや個人ステージ）はlocalhostにフォールバック。
+    // TODO: devステージのCloudFront URLが判明したらここに追加する。
+    const authUrlByStage: Record<string, string> = {
+      staging: "https://d23k1cl6i1ttr4.cloudfront.net",
+      production: "https://d2lc4g19ynkv0b.cloudfront.net",
+    };
+    const authUrl = authUrlByStage[$app.stage] ?? "http://localhost:3000";
+
     // Next.jsアプリをAWSにデプロイ
     const web = new sst.aws.Nextjs("Web", {
       vpc,
       link: [database, openaiApiKey],
       environment: {
         BETTER_AUTH_SECRET: new sst.Secret("BetterAuthSecret").value,
+        BETTER_AUTH_URL: authUrl,
         // ローカルの.envのDATABASE_URLをLambdaに持ち込まない（Resource.Databaseを使わせる）
         DATABASE_URL: "",
       },
