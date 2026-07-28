@@ -51,7 +51,9 @@ export function TodoItem({ todo }: Props) {
       <div className="flex-1 space-y-1">
         <Link
           href={`/todos/${todo.id}`}
-          className={isDone ? "line-through text-muted-foreground" : "hover:underline"}
+          className={
+            isDone ? "line-through text-muted-foreground" : "hover:underline"
+          }
         >
           {todo.title}
         </Link>
