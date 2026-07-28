@@ -10,7 +10,11 @@ function resolveOpenAiApiKey(): string {
   return Resource.OpenaiApiKey.value;
 }
 
-const client = new OpenAI({ apiKey: resolveOpenAiApiKey(), timeout: 20_000, maxRetries: 1 });
+const client = new OpenAI({
+  apiKey: resolveOpenAiApiKey(),
+  timeout: 20_000,
+  maxRetries: 1,
+});
 
 const SYSTEM_PROMPT = `あなたはタスク抽出アシスタントです。
 ユーザーが雑に書き出したテキストから、実行可能なタスクを抽出してください。
