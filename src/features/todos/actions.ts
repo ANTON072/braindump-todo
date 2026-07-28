@@ -2,6 +2,7 @@
 
 import { parseWithZod } from "@conform-to/zod/v4";
 import { revalidatePath } from "next/cache";
+import { ActionResult } from "next/dist/shared/lib/app-router-types";
 import { db } from "@/db";
 import { todos } from "@/db/schema";
 import { requireUserId } from "@/lib/session";
@@ -31,8 +32,15 @@ export async function toggleTodoStatus(todoId: string) {
   revalidatePath("/todos");
 }
 
-export async function deleteTodo(todoId: string) {
+export async function deleteTodo(
+  prevState: unknown,
+  todoId: string,
+): Promise<ActionResult> {
   const userId = await requireUserId();
-  await deleteTodoForUser(db, userId, todoId);
+  const { deleted } = await deleteTodoForUser(db, userId, todoId);
+  if (!deleted) {
+    return { ok: false, message: "削除することはできませんでした" };
+  }
   revalidatePath("/todos");
+  return { ok: true };
 }

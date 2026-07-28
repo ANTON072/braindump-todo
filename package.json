@@ -14,7 +14,8 @@
     "lint": "biome ci .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts"
+    "db:push:test": "drizzle-kit push --config drizzle.test.config.ts",
+    "db:seed:users": "BETTER_AUTH_DISABLE_SIGNUP=false tsx scripts/seed-users.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -51,6 +52,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

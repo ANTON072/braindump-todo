@@ -22,8 +22,12 @@ export default function BraindumpPage() {
     setError(null);
     setExtractedTasks(null);
     try {
-      const tasks = await runBraindumpExtraction(rawText);
-      setExtractedTasks(tasks);
+      const result = await runBraindumpExtraction(rawText);
+      if (!result.ok) {
+        setError(result.message);
+      } else {
+        setExtractedTasks(result.tasks);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "抽出に失敗しました");
     } finally {

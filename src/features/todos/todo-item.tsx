@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { deleteTodo, toggleTodoStatus } from "./actions";
+import { toggleTodoStatus } from "./actions";
+import { DeleteButton } from "./delete-button";
 
 type Priority = "low" | "med" | "high";
 type Status = "open" | "done";
@@ -43,14 +45,16 @@ type Props = {
 export function TodoItem({ todo }: Props) {
   const isDone = todo.status === "done";
   const toggleAction = toggleTodoStatus.bind(null, todo.id);
-  const deleteAction = deleteTodo.bind(null, todo.id);
 
   return (
     <li className="flex items-start gap-3 rounded-lg border p-4">
       <div className="flex-1 space-y-1">
-        <p className={isDone ? "line-through text-muted-foreground" : ""}>
+        <Link
+          href={`/todos/${todo.id}`}
+          className={isDone ? "line-through text-muted-foreground" : "hover:underline"}
+        >
           {todo.title}
-        </p>
+        </Link>
         {todo.notes && (
           <p className="text-sm text-muted-foreground">{todo.notes}</p>
         )}
@@ -76,11 +80,7 @@ export function TodoItem({ todo }: Props) {
             {isDone ? "未完了に戻す" : "完了"}
           </Button>
         </form>
-        <form action={deleteAction}>
-          <Button type="submit" variant="destructive" size="sm">
-            削除
-          </Button>
-        </form>
+        <DeleteButton todoId={todo.id} />
       </div>
     </li>
   );

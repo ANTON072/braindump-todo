@@ -7,14 +7,28 @@ import { todos } from "@/db/schema";
 import { requireUserId } from "@/lib/session";
 import { attachTagsToTodo, normalizeTagNames } from "../tags/upsert-tags";
 import { extractTasksFromBraindump } from "./extract-task";
-import { braindumpFormSchema } from "./schema";
+import { braindumpFormSchema, type ExtractedTask } from "./schema";
 
-export async function runBraindumpExtraction(rawText: string) {
+type ExtractionResult =
+  | { ok: true; tasks: ExtractedTask[] }
+  | { ok: false; message: string };
+
+export async function runBraindumpExtraction(
+  rawText: string,
+): Promise<ExtractionResult> {
   await requireUserId();
   if (rawText.trim().length === 0 || rawText.length > 4000) {
-    throw new Error("テキストは1〜4000文字で入力してください");
+    return { ok: false, message: "テキストは1〜4000文字で入力してください" };
   }
-  return extractTasksFromBraindump(rawText);
+  try {
+    return { ok: true, tasks: await extractTasksFromBraindump(rawText) };
+  } catch (error) {
+    console.error("braindump extraction failed", error);
+    return {
+      ok: false,
+      message: "抽出に失敗しました。少し時間をおいて再度お試しください。",
+    };
+  }
 }
 
 export async function saveBraindumpTasks(
