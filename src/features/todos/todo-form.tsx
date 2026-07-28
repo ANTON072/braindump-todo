@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { createTodo } from "./actions";
-import { todoSchema } from "./shema";
+import { todoSchema } from "./schema";
 
 export function TodoForm() {
   // 第二引数はstateの初期値
